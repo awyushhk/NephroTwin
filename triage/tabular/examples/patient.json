@@ -1,0 +1,10 @@
+{
+  "age": 64,
+  "sex": "Male",
+  "symptoms": ["Flank (side) or kidney pain", "Blood in urine"],
+  "injury_reason": "No",
+  "diabetes": "Yes",
+  "heart_rate": 104,
+  "systolic_bp": 158,
+  "diastolic_bp": 92
+}

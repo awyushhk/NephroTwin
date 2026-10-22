@@ -1,0 +1,30 @@
+{
+  "patient": {
+    "age": 58, "sex": "Male",
+    "symptoms": ["Flank (side) or kidney pain", "Blood in urine", "Frequent or urgent urination"],
+    "injury_reason": "No", "diabetes": "Yes",
+    "heart_rate": 86, "systolic_bp": 145, "diastolic_bp": 92
+  },
+  "tabular": {
+    "kidney": {
+      "ethnicity": "Non-Hispanic Asian",
+      "education_level": 4,
+      "poverty_income_ratio": 2.5,
+      "bmi": 28.4,
+      "height_cm": 172,
+      "bp_systolic": 145,
+      "bp_diastolic": 92,
+      "blood_urea_nitrogen": 28,
+      "albumin_serum": 3.8,
+      "phosphorus": 4.2,
+      "bicarbonate": 22,
+      "calcium": 9.1,
+      "uric_acid": 7.4,
+      "diabetes": "Yes",
+      "insulin_use": "No",
+      "diabetes_pills": "Yes",
+      "smoking_status": "Former"
+    }
+  },
+  "also_check": ["kidney"]
+}

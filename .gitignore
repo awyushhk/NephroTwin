@@ -1,0 +1,5 @@
+# Repo-wide; each module has its own .gitignore for its data and checkpoints
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Streamlit cache
+.streamlit/
+
+# Trained artifacts in models/ are committed (src/predict.py serves them);
+# ignore stray pickles anywhere else
+*.pkl
+*.joblib
+!models/*.joblib
+
+# The NHANES export in data/ is public domain and committed; ignore archives only
+data/*.zip
+
+# Scratch files written by CatBoost / pytabkit during training
+catboost_info/
+rtdl_checkpoints/
+notebooks/catboost_info/
+notebooks/rtdl_checkpoints/
+
+# Logs
+*.log
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Environment variables
+.env
