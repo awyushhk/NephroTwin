@@ -29,7 +29,7 @@ IMAGE_TYPES = ["png", "jpg", "jpeg", "bmp", "tif", "tiff"]
 ORGAN = "kidney"
 
 st.set_page_config(
-    page_title="CKD Risk Predictor",
+    page_title="Renal Risk Prediction System",
     page_icon="\U0001fad8",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -354,8 +354,7 @@ with st.sidebar:
     st.markdown("""
 <div style="text-align:center; padding:1rem 0 0.5rem 0;">
   <div style="font-size:3rem;">\U0001fad8</div>
-  <div style="color:#a78bfa;font-size:1.4rem;font-weight:700;margin:0.3rem 0;">CKD Risk Predictor</div>
-  <div style="color:#9ca3af;font-size:0.85rem;">Chronic Kidney Disease Detection</div>
+  <div style="color:#a78bfa;font-size:1.4rem;font-weight:700;margin:0.3rem 0;">KidneyCare AI</div>
 </div>
 """, unsafe_allow_html=True)
     st.divider()
@@ -384,11 +383,10 @@ st.markdown("""
   <h1 style="font-size:2.4rem; background:linear-gradient(135deg,#a78bfa,#06b6d4);
              -webkit-background-clip:text; -webkit-text-fill-color:transparent;
              background-clip:text; font-weight:800; letter-spacing:-0.5px; margin:0;">
-    Kidney Disease Risk Prediction
+    Renal Risk Prediction System
   </h1>
   <p style="color:#9ca3af; font-size:1.05rem; max-width:600px; margin:0.4rem auto 0;">
-    Chronic Kidney Disease (CKD) &middot; KDIGO criteria &middot;
-    NHANES-trained ML &amp; CT deep learning
+    An AI-driven system that analyzes clinical data and CT scans to assess kidney health and detect potential risks.
   </p>
 </div>
 """, unsafe_allow_html=True)
