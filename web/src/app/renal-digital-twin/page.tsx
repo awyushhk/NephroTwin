@@ -13,16 +13,19 @@ import {
   Database,
   HeartPulse,
   LoaderCircle,
+  Plus,
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Trash2,
 } from "lucide-react";
-import { renalTwinRequest } from "@/lib/api";
+import { ApiError, renalTwinRequest } from "@/lib/api";
 
 type Patient = {
   id: number;
   patient_code: string | null;
   observation_count: number;
+  source_system?: string | null;
 };
 type Observation = {
   id: number;
@@ -32,7 +35,14 @@ type Observation = {
   unit: string;
   observed_at: string;
   source?: string | null;
+  source_observation_id?: string | null;
+  source_item_id?: string | null;
+  source_original_label?: string | null;
+  source_charttime_text?: string | null;
+  source_timestamp_timezone?: string | null;
+  note?: string | null;
 };
+type ChartObservation = { id: number; measurement_type: string; value: number; unit: string; observed_at: string; source?: string | null; source_observation_id?: string | null };
 type Measurement = {
   latest: {
     value: number;
@@ -67,11 +77,28 @@ type TwinState = {
 };
 type Scenario = {
   id: number;
-  assumptions: { rate_per_year: number; step_months: number };
+  assumptions: { rate_per_year: number; step_months: number; comparison_group_id?: string | null; scenario_label?: string | null; comparison_index?: number | null };
   horizon_months: number;
   output: { points: { month: number; value: number }[]; warnings: string[] };
   baseline_observation_id: number;
 };
+type ScenarioDraft = { key: string; rate: string };
+type ScenarioComparisonMetadata = {
+  comparison_group_id: string;
+  scenario_label: string;
+  comparison_index: number;
+};
+
+function readScenarioComparisonMetadata(patientId: number) {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(`renal-twin-scenario-groups-${patientId}`) ?? "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, ScenarioComparisonMetadata>
+      : {};
+  } catch {
+    return {};
+  }
+}
 const specs: Record<
   string,
   { label: string; short: string; unit: string; color: string }
@@ -147,9 +174,13 @@ function formatDate(value?: string | null, withTime = false) {
   return new Intl.DateTimeFormat(
     undefined,
     withTime
-      ? { dateStyle: "medium", timeStyle: "short" }
-      : { dateStyle: "medium" },
+      ? { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }
+      : { dateStyle: "medium", timeZone: "UTC" },
   ).format(date);
+}
+
+function formatUtcMonth(value: number) {
+  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", timeZone: "UTC" }).format(new Date(value));
 }
 
 function observationX(value: string, start: number, span: number) {
@@ -164,10 +195,12 @@ function TrendChart({
   observations,
   scenarios,
   measure,
+  timeBounds,
 }: {
-  observations: Observation[];
+  observations: ChartObservation[];
   scenarios: Scenario[];
   measure: string;
+  timeBounds?: { start: number; end: number };
 }) {
   const rows = useMemo(
     () =>
@@ -210,9 +243,9 @@ function TrendChart({
         ),
       );
     if (!times.length || !values.length) return null;
-    const start = Math.min(...times);
+    const start = timeBounds?.start ?? Math.min(...times);
     const rawEnd = Math.max(...times);
-    const end = rawEnd === start ? start + 86400000 : rawEnd;
+    const end = Math.max(timeBounds?.end ?? rawEnd, start + 86400000);
     const rawLow = Math.min(...values);
     const rawHigh = Math.max(...values);
     const padding = Math.max(
@@ -223,7 +256,7 @@ function TrendChart({
     const low = rawLow - padding;
     const high = rawHigh + padding;
     return { start, span: end - start, low, high, points };
-  }, [actualScenarios, rows]);
+  }, [actualScenarios, rows, timeBounds]);
 
   if (!chart || !rows.length) {
     return (
@@ -249,13 +282,6 @@ function TrendChart({
     { length: 5 },
     (_, index) => chart.start + (chart.span * index) / 4,
   );
-  const observedLine = chart.points
-    .map(
-      (point) =>
-        `${observationX(new Date(point.time).toISOString(), chart.start, chart.span)},${valueY(point.value, chart.low, chart.high)}`,
-    )
-    .join(" ");
-
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-3 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -342,22 +368,10 @@ function TrendChart({
                 fill="#64748b"
                 fontSize="10"
               >
-                {new Intl.DateTimeFormat(undefined, {
-                  year: "numeric",
-                  month: "short",
-                }).format(new Date(tick))}
+                {formatUtcMonth(tick)}
               </text>
             </g>
           ))}
-          {rows.length > 1 && (
-            <polyline
-              points={observedLine}
-              fill="none"
-              stroke={specs[measure]?.color ?? "#0f766e"}
-              strokeOpacity="0.2"
-              strokeWidth="1.5"
-            />
-          )}
           {actualScenarios.map((scenario) => {
             const baseline = rows.find(
               (row) => row.id === scenario.baseline_observation_id,
@@ -383,6 +397,19 @@ function TrendChart({
               </polyline>
             );
           })}
+          {chart.points.length > 1 && (
+            <polyline
+              points={chart.points
+                .map((point) => `${58 + ((point.time - chart.start) / chart.span) * 666},${valueY(point.value, chart.low, chart.high)}`)
+                .join(" ")}
+              fill="none"
+              stroke={specs[measure]?.color ?? "#0f766e"}
+              strokeWidth="1.75"
+              strokeOpacity="0.65"
+            >
+              <title>Visual guide connecting the recorded observations</title>
+            </polyline>
+          )}
           {rows.map((row) => (
             <circle
               key={row.id}
@@ -410,9 +437,9 @@ function TrendChart({
         </svg>
       </div>
       <p className="mt-1 text-[11px] leading-5 text-slate-500">
-        Markers represent source observations at their recorded timestamps. The
-        faint guide between observed points does not imply daily measurements;
-        dashed lines are mathematical scenarios, not observed results.
+        Dots mark recorded observations. The solid line is a visual guide between
+        measurements; no values were recorded between those timestamps. Dashed
+        lines, when shown, are hypothetical scenarios.
       </p>
     </div>
   );
@@ -446,6 +473,7 @@ export default function RenalDigitalTwinPage() {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [twin, setTwin] = useState<TwinState | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [analysisWindowDays, setAnalysisWindowDays] = useState("all");
   const [measurementFilter, setMeasurementFilter] = useState("egfr");
   const [kind, setKind] = useState("egfr");
   const [value, setValue] = useState("");
@@ -458,7 +486,10 @@ export default function RenalDigitalTwinPage() {
     null,
   );
   const [scenarioBase, setScenarioBase] = useState("");
-  const [rate, setRate] = useState("-1");
+  const [scenarioDrafts, setScenarioDrafts] = useState<ScenarioDraft[]>([
+    { key: "scenario-a", rate: "-1" },
+    { key: "scenario-b", rate: "" },
+  ]);
   const [horizon, setHorizon] = useState("12");
   const [loadingPatients, setLoadingPatients] = useState(true);
   const [loadingPatient, setLoadingPatient] = useState(false);
@@ -506,7 +537,11 @@ export default function RenalDigitalTwinPage() {
       ]);
       setObservations(rows);
       setTwin(state);
-      setScenarios(savedScenarios);
+      const comparisonMetadata = readScenarioComparisonMetadata(id);
+      setScenarios(savedScenarios.map((scenario) => {
+        const metadata = comparisonMetadata[String(scenario.id)];
+        return metadata ? { ...scenario, assumptions: { ...scenario.assumptions, ...metadata } } : scenario;
+      }));
       setScenarioBase((current) =>
         current && rows.some((row) => String(row.id) === current)
           ? current
@@ -734,26 +769,92 @@ export default function RenalDigitalTwinPage() {
   async function saveScenario(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!patientId || !scenarioBase) return;
+    const rates = scenarioDrafts.map((draft) => Number(draft.rate));
+    if (scenarioDrafts.length < 2 || scenarioDrafts.some((draft) => draft.rate.trim() === "") ||
+        rates.some((value) => !Number.isFinite(value) || value < -30 || value > 30) ||
+        new Set(rates).size !== rates.length) {
+      setError("Enter a different valid yearly rate for each scenario (−30 to 30 mL/min/1.73m² per year). At least two scenarios are required.");
+      return;
+    }
     setSavingScenario(true);
     setError("");
     setNotice("");
+    const requestScenarios = scenarioDrafts.map((draft, index) => ({
+      label: `Scenario ${String.fromCharCode(65 + index)}`,
+      rate_per_year: Number(draft.rate),
+    }));
     try {
-      await renalTwinRequest(`/patients/${patientId}/scenarios`, {
-        method: "POST",
-        body: JSON.stringify({
-          baseline_observation_id: Number(scenarioBase),
-          rate_per_year: Number(rate),
-          horizon_months: Number(horizon),
-        }),
-      });
-      await refreshPatient();
-      setNotice("Scenario saved separately from observed measurements.");
+      try {
+        await renalTwinRequest(`/patients/${patientId}/scenarios/compare`, {
+          method: "POST",
+          body: JSON.stringify({
+            baseline_observation_id: Number(scenarioBase),
+            horizon_months: Number(horizon),
+            scenarios: requestScenarios,
+          }),
+        });
+        await refreshPatient();
+        setNotice("Comparison saved. Each hypothetical path remains separate from observed measurements.");
+      } catch (reason) {
+        const comparisonRouteUnavailable = reason instanceof ApiError &&
+          (reason.status === 404 || reason.status === 405) &&
+          (reason.detail === "Not Found" || reason.detail === "Method Not Allowed");
+        if (!comparisonRouteUnavailable) throw reason;
+
+        // Older local API processes have the original single-scenario route but not the
+        // atomic comparison route. Save each path through that route, and remove any
+        // paths already created if a later save fails.
+        const comparisonGroupId = crypto.randomUUID();
+        const created: Scenario[] = [];
+        try {
+          for (const [index, item] of requestScenarios.entries()) {
+            const scenario = await renalTwinRequest<Scenario>(`/patients/${patientId}/scenarios`, {
+              method: "POST",
+              body: JSON.stringify({
+                baseline_observation_id: Number(scenarioBase),
+                rate_per_year: item.rate_per_year,
+                horizon_months: Number(horizon),
+              }),
+            });
+            created.push({
+              ...scenario,
+              assumptions: {
+                ...scenario.assumptions,
+                comparison_group_id: comparisonGroupId,
+                scenario_label: item.label,
+                comparison_index: index,
+              },
+            });
+          }
+        } catch (saveError) {
+          const cleanup = await Promise.allSettled(created.map((scenario) =>
+            renalTwinRequest<void>(`/patients/${patientId}/scenarios/${scenario.id}`, { method: "DELETE" }),
+          ));
+          if (cleanup.some((result) => result.status === "rejected")) {
+            setScenarios((current) => [...created, ...current]);
+            throw new Error(`Some comparison paths were saved but could not be rolled back. Their scenario IDs are ${created.map((scenario) => scenario.id).join(", ")}. ${saveError instanceof Error ? saveError.message : ""}`);
+          }
+          throw saveError;
+        }
+
+        const metadata = readScenarioComparisonMetadata(Number(patientId));
+        created.forEach((scenario) => {
+          metadata[String(scenario.id)] = {
+            comparison_group_id: comparisonGroupId,
+            scenario_label: scenario.assumptions.scenario_label ?? "Saved scenario",
+            comparison_index: scenario.assumptions.comparison_index ?? 0,
+          };
+        });
+        try {
+          window.localStorage.setItem(`renal-twin-scenario-groups-${patientId}`, JSON.stringify(metadata));
+        } catch {
+          // The comparison still works in the current view if browser storage is unavailable.
+        }
+        setScenarios((current) => [...created.slice().reverse(), ...current]);
+        setNotice("Comparison saved. The running API used its single-scenario compatibility route; comparison labels are saved in this browser.");
+      }
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "The scenario could not be saved.",
-      );
+      setError(reason instanceof Error ? reason.message : "The scenario could not be saved.");
     } finally {
       setSavingScenario(false);
     }
@@ -770,6 +871,13 @@ export default function RenalDigitalTwinPage() {
       setScenarios((current) =>
         current.filter((scenario) => scenario.id !== id),
       );
+      const comparisonMetadata = readScenarioComparisonMetadata(Number(patientId));
+      delete comparisonMetadata[String(id)];
+      try {
+        window.localStorage.setItem(`renal-twin-scenario-groups-${patientId}`, JSON.stringify(comparisonMetadata));
+      } catch {
+        // Removing a scenario from the API should still succeed if browser storage is unavailable.
+      }
       await refreshPatient();
       setNotice("Scenario removed. Observed measurements were not changed.");
     } catch (reason) {
@@ -782,6 +890,29 @@ export default function RenalDigitalTwinPage() {
       setDeletingScenarioId(null);
     }
   }
+
+  const analysisBounds = useMemo(() => {
+    const times = observations
+      .filter((row) => row.measurement_type === measurementFilter)
+      .map((row) => new Date(row.observed_at).getTime())
+      .filter(Number.isFinite);
+    if (!times.length) return undefined;
+    const end = Math.max(...times);
+    const earliest = Math.min(...times);
+    const start = analysisWindowDays === "all"
+      ? earliest
+      : Math.max(earliest, end - Number(analysisWindowDays) * 86400000);
+    return { start, end };
+  }, [analysisWindowDays, measurementFilter, observations]);
+
+  const timelineChartObservations = useMemo(() => {
+    if (!analysisBounds) return [];
+    return observations.filter((row) => {
+      if (row.measurement_type !== measurementFilter) return false;
+      const time = new Date(row.observed_at).getTime();
+      return Number.isFinite(time) && time >= analysisBounds.start && time <= analysisBounds.end;
+    });
+  }, [analysisBounds, measurementFilter, observations]);
 
   return (
     <main className="mx-auto w-full max-w-7xl space-y-6 pb-10">
@@ -856,6 +987,12 @@ export default function RenalDigitalTwinPage() {
           </div>
         </div>
       </header>
+
+      {selectedPatient?.source_system === "MIMIC-IV-v3.1" && (
+        <div role="note" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          MIMIC-IV dates are de-identified and shifted; they are not real-world calendar dates. Source chart times have no timezone. Dates here are shown in UTC to preserve the stored source clock time.
+        </div>
+      )}
 
       {error && (
         <div
@@ -1062,7 +1199,7 @@ export default function RenalDigitalTwinPage() {
               id="state-heading"
               className="mt-1 text-xl font-bold text-slate-900"
             >
-              Current twin state
+              01 · Current Renal State
             </h2>
             <p className="mt-1 text-sm text-slate-500">
               Latest available values from recorded data, with the time and
@@ -1234,31 +1371,24 @@ export default function RenalDigitalTwinPage() {
               Renal measurement timeline
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Page through every recorded result. The chart uses the latest 500
-              observations; missing intervals remain gaps.
+              The chart filters the most recent 500 loaded observations by this
+              window; missing intervals remain gaps. Page through the full history below.
             </p>
           </div>
-          <label
-            htmlFor="measurement-filter"
-            className="text-xs font-semibold text-slate-600"
-          >
-            Measure
-            <select
-              id="measurement-filter"
-              value={measurementFilter}
-              onChange={(event) => {
-                setMeasurementFilter(event.target.value);
-                setTimelinePage(0);
-              }}
-              className="ml-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800"
-            >
-              {Object.entries(specs).map(([key, spec]) => (
-                <option key={key} value={key}>
-                  {spec.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="measurement-filter" className="text-xs font-semibold text-slate-600">
+              Measure
+              <select id="measurement-filter" value={measurementFilter} onChange={(event) => { setMeasurementFilter(event.target.value); setTimelinePage(0); }} className="ml-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800">
+                {Object.entries(specs).map(([key, spec]) => <option key={key} value={key}>{spec.label}</option>)}
+              </select>
+            </label>
+            <label htmlFor="trend-window" className="text-xs font-semibold text-slate-600">
+              Trend window
+              <select id="trend-window" value={analysisWindowDays} onChange={(event) => setAnalysisWindowDays(event.target.value)} className="ml-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800">
+                <option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="1825">5 years</option><option value="all">All history</option>
+              </select>
+            </label>
+          </div>
         </div>
         {loadingPatient ? (
           <div className="flex min-h-64 items-center justify-center text-sm text-slate-500">
@@ -1267,9 +1397,10 @@ export default function RenalDigitalTwinPage() {
           </div>
         ) : (
           <TrendChart
-            observations={observations}
+            observations={timelineChartObservations}
             scenarios={scenarios}
             measure={measurementFilter}
+            timeBounds={analysisBounds}
           />
         )}
         <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
@@ -1280,7 +1411,7 @@ export default function RenalDigitalTwinPage() {
                 <th className="px-4 py-3 font-semibold">Measurement</th>
                 <th className="px-4 py-3 font-semibold">Result</th>
                 <th className="px-4 py-3 font-semibold">Source</th>
-                <th className="px-4 py-3 font-semibold">Record</th>
+                <th className="px-4 py-3 font-semibold">Record ID</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1314,10 +1445,10 @@ export default function RenalDigitalTwinPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">
-                        {row.source ?? "Source record"}
+                        {row.source_original_label ? `${row.source_original_label} · ` : ""}{row.source ?? "Source record"}{row.source_item_id ? ` · item ${row.source_item_id}` : ""}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                        #{row.id}
+                        #{row.source_observation_id ?? row.id}{row.source_observation_id ? " source" : ""}
                       </td>
                     </tr>
                   ))
@@ -1406,8 +1537,7 @@ export default function RenalDigitalTwinPage() {
                 What-if scenario simulator
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-600">
-                Choose a recorded eGFR, enter an assumed yearly change, and pick
-                a time period. We’ll show the simple calculated result.
+                Compare user-defined eGFR assumptions from one recorded baseline. These deterministic scenarios are not predictions.
               </p>
             </div>
           </div>
@@ -1444,53 +1574,33 @@ export default function RenalDigitalTwinPage() {
                 ))}
               </select>
             </div>
-            <div>
-              <label
-                htmlFor="scenario-rate"
-                className="text-xs font-semibold text-slate-700"
-              >
-                2. Assumed eGFR change each year
-              </label>
-              <div className="relative">
-                <input
-                  id="scenario-rate"
-                  className={`${input} pr-20`}
-                  type="number"
-                  min="-30"
-                  max="30"
-                  step="0.1"
-                  required
-                  value={rate}
-                  onChange={(event) => setRate(event.target.value)}
-                />
-                <span className="pointer-events-none absolute right-3 top-4 text-[10px] text-slate-500">
-                  mL/min/year
-                </span>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">
-                Use a negative number for a decrease, or positive for an
-                increase.
-              </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">2. Define at least two different yearly changes</p><button type="button" onClick={() => setScenarioDrafts((current) => current.length >= 5 ? current : [...current, { key: crypto.randomUUID(), rate: "" }])} disabled={scenarioDrafts.length >= 5} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-50 disabled:opacity-40"><Plus className="h-3.5 w-3.5" />Add scenario</button></div>
+              {scenarioDrafts.map((draft, index) => <div key={draft.key} className="flex items-end gap-2 rounded-xl border border-slate-200 bg-white p-3">
+                <label htmlFor={`scenario-rate-${index}`} className="min-w-0 flex-1 text-xs font-semibold text-slate-700">Scenario {String.fromCharCode(65 + index)} · eGFR change per year<input id={`scenario-rate-${index}`} className={input} type="number" min="-30" max="30" step="0.1" required value={draft.rate} onChange={(event) => setScenarioDrafts((current) => current.map((item) => item.key === draft.key ? { ...item, rate: event.target.value } : item))} placeholder="e.g. -1.0" /></label>
+                {scenarioDrafts.length > 2 && <button type="button" aria-label={`Remove scenario ${index + 1}`} onClick={() => setScenarioDrafts((current) => current.filter((item) => item.key !== draft.key))} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-700"><Trash2 className="h-4 w-4" /></button>}
+              </div>)}
+              <p className="text-[11px] text-slate-500">Use different values between −30 and +30 mL/min/1.73m²/year. The rate is your assumption; it is not learned from the patient’s record.</p>
             </div>
             <div>
               <label
                 htmlFor="scenario-horizon"
                 className="text-xs font-semibold text-slate-700"
               >
-                3. Show result after
+                3. Compare at the same time period
               </label>
-              <select
+              <input
                 id="scenario-horizon"
                 className={input}
+                type="number"
+                min="1"
+                max="120"
+                step="1"
+                required
                 value={horizon}
                 onChange={(event) => setHorizon(event.target.value)}
-              >
-                {[6, 12, 24, 36, 60, 120].map((months) => (
-                  <option key={months} value={months}>
-                    {months} months
-                  </option>
-                ))}
-              </select>
+              />
+              <p className="mt-1 text-[11px] text-slate-500">Enter 1 to 120 months.</p>
             </div>
             <button
               className={`${primaryButton} w-full bg-violet-700 hover:bg-violet-800`}
@@ -1506,25 +1616,29 @@ export default function RenalDigitalTwinPage() {
               ) : (
                 <ArrowRight className="h-4 w-4" />
               )}
-              {savingScenario ? "Calculating…" : "Show this example"}
+              {savingScenario ? "Saving comparison…" : "Save and compare scenarios"}
             </button>
             <p className="text-[11px] leading-5 text-slate-500">
-              This is a simple illustration based on your assumption. It is not
-              a medical prediction.
+              Calculation: baseline + assumed annual change × months / 12. Results are hypothetical and are not a validated clinical forecast or treatment effect.
             </p>
           </form>
-          <div className="min-w-0">
+          <div className="min-w-0 h-full">
             {scenarios.length ? (
               <div
-                className="max-h-[26rem] space-y-3 overflow-y-auto overscroll-contain pr-2"
+                className="h-full min-h-[26rem] max-h-full space-y-3 overflow-y-auto overscroll-contain pr-2"
                 tabIndex={0}
                 aria-label="Saved example results. Scroll to see more."
               >
-                {scenarios.map((scenario) => {
+                {scenarios.slice().sort((a, b) => (a.assumptions.comparison_group_id === b.assumptions.comparison_group_id ? (a.assumptions.comparison_index ?? 0) - (b.assumptions.comparison_index ?? 0) : b.id - a.id)).map((scenario) => {
                   const baseline = observations.find(
                     (row) => row.id === scenario.baseline_observation_id,
                   );
                   const end = scenario.output.points.at(-1);
+                  const comparisonBaseline = scenario.assumptions.comparison_group_id
+                    ? scenarios.find((item) => item.assumptions.comparison_group_id === scenario.assumptions.comparison_group_id && item.assumptions.comparison_index === 0)
+                    : undefined;
+                  const baselineEnd = comparisonBaseline?.output.points.at(-1)?.value;
+                  const difference = end?.value != null && baselineEnd != null ? Math.abs(end.value - baselineEnd) : null;
                   return (
                     <article
                       key={scenario.id}
@@ -1533,13 +1647,13 @@ export default function RenalDigitalTwinPage() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-violet-950">
-                            Example result
+                            {scenario.assumptions.scenario_label ?? "Saved scenario"}
                           </p>
                           <p className="mt-1 text-xs text-violet-900">
                             Starting from a recorded eGFR of{" "}
                             {baseline?.value ?? "—"} on{" "}
                             {formatDate(baseline?.observed_at)}, assuming{" "}
-                            {scenario.assumptions.rate_per_year} mL/min/year for{" "}
+                            {scenario.assumptions.rate_per_year} mL/min/1.73m²/year for{" "}
                             {scenario.horizon_months} months.
                           </p>
                         </div>
@@ -1569,13 +1683,14 @@ export default function RenalDigitalTwinPage() {
                         </div>
                         <div className="rounded-xl bg-white p-3">
                           <p className="text-[10px] uppercase tracking-wide text-slate-500">
-                            Example after {scenario.horizon_months} months
+                            eGFR after {scenario.horizon_months} months
                           </p>
                           <p className="mt-1 text-lg font-bold text-violet-800">
                             {end?.value ?? "—"} mL/min
                           </p>
                         </div>
                       </div>
+                      {difference != null && <p className="mt-2 text-xs font-semibold text-violet-900">Absolute difference vs {comparisonBaseline?.assumptions.scenario_label ?? "baseline scenario"}: {difference.toFixed(4)} mL/min/1.73m²</p>}
                       <p className="mt-3 text-[11px] leading-5 text-violet-900">
                         {scenario.output.warnings.join(" ")}
                       </p>

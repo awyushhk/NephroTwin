@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from api.renal_twin import compute_state, simulate_egfr, validate_measurement
+from api.renal_twin import compute_observability, compute_state, simulate_egfr, utc_iso, validate_measurement
+from api.schemas_renal import ScenarioComparisonCreate
 
 def obs(ident, kind, value, when, unit=None):
     units = {"egfr": "mL/min/1.73m2", "acr": "mg/g", "creatinine": "mg/dL", "systolic_bp": "mmHg", "diastolic_bp": "mmHg"}
@@ -55,3 +57,64 @@ def test_deterministic_scenario_and_invalid_horizon():
     assert simulate_egfr(60, -2, 12) == simulate_egfr(60, -2, 12)
     assert simulate_egfr(60, -2, 12)["points"][-1]["value"] == 58
     with pytest.raises(ValueError): simulate_egfr(60, 0, 121)
+
+
+def test_observability_uses_event_times_and_reports_irregular_gaps():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        obs(1, "egfr", 80, start),
+        obs(2, "egfr", 70, start + timedelta(days=19)),
+        obs(3, "egfr", 60, start + timedelta(days=40)),
+    ]
+    result = compute_observability(
+        rows,
+        source_system="manual",
+        as_of=start + timedelta(days=40),
+        trend_window_days=365,
+        recent_window_days=30,
+        historical_window_days=365,
+        minimum_trend_observations=3,
+        minimum_trend_span_days=30,
+    )
+    egfr = result["measurements"]["egfr"]
+    assert egfr["valid_observation_count"] == 3
+    assert egfr["elapsed_days_since_previous"] == 21
+    assert egfr["median_interval_days"] == 20
+    assert egfr["recent_observation_count"] == 2
+    assert egfr["historical_observation_count"] == 1
+    assert egfr["trend"]["sufficient"] is True
+    assert egfr["trend"]["absolute_change"] == -20
+    assert egfr["trend"]["elapsed_days"] == 40
+    assert egfr["trend"]["rate_per_year"] == pytest.approx(-20 * 365.25 / 40)
+    assert "Variable gaps" in egfr["sampling_description"]
+
+
+def test_observability_keeps_missingness_unknown_without_a_schedule():
+    result = compute_observability([], source_system="manual", as_of=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    egfr = result["measurements"]["egfr"]
+    assert egfr["availability"] == "missing"
+    assert egfr["missingness"]["denominator"] is None
+    assert egfr["missingness"]["percent"] is None
+    assert egfr["trend"]["sufficient"] is False
+    assert egfr["trend"]["rate_per_year"] is None
+
+
+def test_timestamp_api_normalization_preserves_mimic_source_clock_time():
+    # PostgreSQL returns this instant in Asia/Calcutta; the MIMIC source charttime has no zone.
+    returned = datetime(2154, 8, 9, 11, 20, tzinfo=ZoneInfo("Asia/Calcutta"))
+    assert utc_iso(returned) == "2154-08-09T05:50:00Z"
+
+
+def test_scenario_comparison_requires_multiple_distinct_user_assumptions():
+    comparison = ScenarioComparisonCreate(
+        baseline_observation_id=10,
+        horizon_months=12,
+        scenarios=[{"label": "Scenario A", "rate_per_year": -1}, {"label": "Scenario B", "rate_per_year": 0}],
+    )
+    assert len(comparison.scenarios) == 2
+    with pytest.raises(ValueError):
+        ScenarioComparisonCreate(
+            baseline_observation_id=10,
+            horizon_months=12,
+            scenarios=[{"label": "Scenario A", "rate_per_year": -1}, {"label": "Scenario B", "rate_per_year": -1}],
+        )

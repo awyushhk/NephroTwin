@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 class PatientCreate(BaseModel):
     patient_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
@@ -49,3 +49,25 @@ class ScenarioCreate(BaseModel):
     baseline_observation_id: int
     rate_per_year: float = Field(ge=-30, le=30)
     horizon_months: int = Field(ge=1, le=120)
+    comparison_group_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    scenario_label: str | None = Field(default=None, max_length=40)
+    comparison_index: int | None = Field(default=None, ge=0, le=9)
+
+class ScenarioComparisonItem(BaseModel):
+    label: str = Field(min_length=1, max_length=40)
+    rate_per_year: float = Field(ge=-30, le=30, allow_inf_nan=False)
+
+class ScenarioComparisonCreate(BaseModel):
+    baseline_observation_id: int
+    horizon_months: int = Field(ge=1, le=120)
+    scenarios: list[ScenarioComparisonItem] = Field(min_length=2, max_length=5)
+
+    @model_validator(mode="after")
+    def distinct_scenario_rates_and_labels(self):
+        rates = [item.rate_per_year for item in self.scenarios]
+        labels = [item.label.strip().casefold() for item in self.scenarios]
+        if len(set(rates)) != len(rates):
+            raise ValueError("Each comparison scenario must use a different annual rate.")
+        if len(set(labels)) != len(labels):
+            raise ValueError("Scenario labels must be unique within a comparison.")
+        return self

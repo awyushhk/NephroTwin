@@ -82,10 +82,26 @@ Do not run a broad table reset or delete non-synthetic patients. The application
 - `GET /api/renal-twin/patients/{patient_id}/state`
 - `POST /api/renal-twin/patients/{patient_id}/update`
 - `GET /api/renal-twin/patients/{patient_id}/history`
+- `GET /api/renal-twin/patients/{patient_id}/analysis?trend_window_days=365` (`0` means all history)
 - `GET/POST /api/renal-twin/patients/{patient_id}/scenarios`
+- `POST /api/renal-twin/patients/{patient_id}/scenarios/compare`
 - `GET /api/renal-twin/scenarios/{scenario_id}`
 
 OpenAPI is available at `http://localhost:8000/docs`. Observation input accepts only documented units: creatinine `mg/dL`, eGFR `mL/min/1.73m2`, ACR `mg/g`, and blood pressure `mmHg`. Timestamps must include a timezone. The optional idempotency key is unique within a patient.
+
+## Observability, trend windows, and timestamps
+
+The observability endpoint validates stored value/unit pairs with the same existing measurement rules, reports valid and invalid counts, latest and prior event times, median elapsed interval, recent and historical window counts, staleness, source provenance, and source timestamp checks. Recent and historical windows are anchored to the latest event time for MIMIC-IV profiles (their event dates are de-identified and can be future-shifted); other profiles use the current UTC time. The default recent window is 30 days and the historical window is the preceding 365 days excluding that recent window. No sampling schedule exists, so the API returns an unknown missingness denominator and does not calculate a missingness percentage.
+
+Descriptive eGFR and creatinine endpoint rates use the first and last valid observation in the selected time window: `(last value - first value) / elapsed days × 365.25`. The default minimum is three observations spanning at least 30 days. These settings are configurable in `api/.env`: `RENAL_OBSERVABILITY_RECENT_DAYS`, `RENAL_OBSERVABILITY_HISTORICAL_DAYS`, `RENAL_OBSERVABILITY_STALE_DAYS`, `RENAL_TREND_MIN_OBSERVATIONS`, and `RENAL_TREND_MIN_SPAN_DAYS`. The UI offers 30/90/365/1825 days or all history. Trend output is descriptive and can be misleading with sparse samples or acute changes. It is not a validated progression rate or diagnosis.
+
+The timeline chart defaults to all history and shows the selected biomarker using its recorded timestamps. A solid line connects observation dots as a visual guide only; it does not indicate measurements between those timestamps. The chart uses the most recent 500 observations loaded by the existing page request; the paginated history table remains unchanged and reports source timestamps, measurement labels, item IDs, and source observation IDs when present. Endpoint-rate cards, aligned eGFR/creatinine panels, the observability panel, and the state evolution/provenance section were removed from the page. The analysis and history endpoints remain available to API clients.
+
+Timestamp inspection confirmed that the MIMIC chart-time text is timezone-unspecified, while the importer stores that wall time using UTC as a deterministic database convention and retains both the source text and timezone provenance. PostgreSQL in this environment returns the stored instant in `Asia/Calcutta`; for example, source `2154-08-09 05:50:00` was returned as `11:20+05:30`. API event timestamps are now normalized to UTC and the page formats dates in UTC, so the displayed time matches the retained source chart clock instead of applying the host/browser timezone. The year remains shifted because MIMIC dates are de-identified; no timestamp was rewritten. This is covered by a UTC-normalization regression test.
+
+Snapshot history is derived from the existing `renal_twin_updates` records. It compares each stored source observation-ID set and descriptive measurement summaries with the preceding stored snapshot, and marks an added observation as late historical data when its `observed_at` precedes the preceding snapshot's latest event time. The first retained snapshot has no comparison. The state evolution/provenance section is hidden in the current UI; snapshots and API records remain stored. No new database table or migration was needed.
+
+Multiple scenario comparisons use the existing scenario table. The comparison endpoint validates two to five distinct user-entered annual rates and stores each scenario separately, with a shared comparison group, label, baseline reference, assumptions, output, and algorithm version. The full group is inserted transactionally. Values use the existing deterministic monthly calculation and are warned when outside the supported eGFR range; outputs are never clamped. Differences are absolute endpoint differences from Scenario A at the same baseline and horizon. Scenario rates are user assumptions, not estimates learned from the patient record.
 
 ## Clinical assumptions and limitations
 
