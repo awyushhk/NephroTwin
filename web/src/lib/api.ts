@@ -33,7 +33,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
         detail = errorJson.detail;
       } else if (Array.isArray(errorJson?.detail)) {
         detail = errorJson.detail
-          .map((item: any) => item.msg || JSON.stringify(item))
+          .map((item: unknown) => typeof item === "object" && item !== null && "msg" in item ? String(item.msg) : JSON.stringify(item))
           .join("; ");
       } else if (errorJson?.message) {
         detail = errorJson.message;
@@ -45,7 +45,20 @@ async function handleResponse<T>(res: Response): Promise<T> {
     }
     throw new ApiError(res.status, detail);
   }
+  // DELETE endpoints may correctly return 204 with no response body.
+  if (res.status === 204 || res.status === 205) {
+    return undefined as T;
+  }
   return res.json();
+}
+
+export async function renalTwinRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/renal-twin${path}`, {
+    ...init,
+    headers: { Accept: "application/json", ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
+    cache: "no-store",
+  });
+  return handleResponse<T>(res);
 }
 
 /** Check health status of the backend API. */
@@ -71,7 +84,7 @@ export async function getKidneyMetadata(signal?: AbortSignal): Promise<MetadataR
 
 /** Submit clinical questionnaire inputs for tabular CKD risk prediction. */
 export async function predictTabular(
-  inputs: Record<string, any>,
+  inputs: Record<string, unknown>,
   signal?: AbortSignal
 ): Promise<TabularPredictionResponse> {
   const res = await fetch(`${API_BASE_URL}/api/kidney/tabular`, {

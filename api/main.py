@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routes import health, kidney
+from api.routes import health, kidney, renal_twin
 from api.services import get_tabular_module, get_image_module
 
 logging.basicConfig(
@@ -106,6 +106,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # All endpoints mounted under /api
 app.include_router(health.router, prefix="/api")
 app.include_router(kidney.router, prefix="/api")
+app.include_router(renal_twin.router, prefix="/api")
 
 # Also provide direct /health for standard health checks
 app.include_router(health.router)

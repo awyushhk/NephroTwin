@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   AlertOctagon,
-  ScanLine,
   Eye,
   Info,
 } from "lucide-react";
@@ -25,8 +24,9 @@ export default function ImageResultCard({ result, originalFile }: ImageResultCar
   useEffect(() => {
     if (originalFile) {
       const url = URL.createObjectURL(originalFile);
-      setOriginalUrl(url);
+      const timer = window.setTimeout(() => setOriginalUrl(url), 0);
       return () => {
+        window.clearTimeout(timer);
         URL.revokeObjectURL(url);
       };
     }
@@ -222,7 +222,7 @@ export default function ImageResultCard({ result, originalFile }: ImageResultCar
                 <span className="text-xs font-semibold text-slate-700 block">
                   Original Uploaded CT Slice
                 </span>
-                <div className="relative w-full aspect-square max-w-[280px] mx-auto rounded-lg overflow-hidden border border-slate-300 bg-black">
+                <div className="relative w-full aspect-square max-w-[480px] mx-auto rounded-lg overflow-hidden border border-slate-300 bg-black">
                   {originalUrl ? (
                     <Image
                       src={originalUrl}
@@ -245,7 +245,7 @@ export default function ImageResultCard({ result, originalFile }: ImageResultCar
                 <span className="text-xs font-semibold text-slate-700 block">
                   Grad-CAM Feature Activation Overlay
                 </span>
-                <div className="relative w-full aspect-square max-w-[280px] mx-auto rounded-lg overflow-hidden border border-slate-300 bg-black">
+                <div className="relative w-full aspect-square max-w-[480px] mx-auto rounded-lg overflow-hidden border border-slate-300 bg-black">
                   {overlaySrc ? (
                     <Image
                       src={overlaySrc}

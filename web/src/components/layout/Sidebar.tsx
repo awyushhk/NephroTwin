@@ -10,6 +10,7 @@ import {
   Activity,
   X,
   ShieldAlert,
+  HeartPulse,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +37,12 @@ const NAV_ITEMS = [
     href: "/ct-analysis",
     icon: ScanLine,
     badge: "Image",
+  },
+  {
+    name: "Digital Twin",
+    href: "/renal-digital-twin",
+    icon: HeartPulse,
+    badge: "Longitudinal",
   },
   {
     name: "About the Models",

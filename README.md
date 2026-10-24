@@ -78,6 +78,8 @@ python -m src.predict --image ct_slice.png --heatmap-dir out
 
 ## Front end
 
+The Next.js interface also includes the `/renal-digital-twin` longitudinal observation and simulation page. See [`docs/renal-digital-twin.md`](docs/renal-digital-twin.md) for PostgreSQL setup, migrations, synthetic data, API routes, and research-use limitations.
+
 [`frontend/app/streamlit_app.py`](frontend/app/streamlit_app.py) provides a unified UI for
 both models:
 

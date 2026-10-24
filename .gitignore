@@ -3,3 +3,17 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 .pytest_cache/
+.env
+api/.env
+api/.env.*
+!api/.env.example
+
+# Local datasets, cohort exports, and database backups
+data/raw/
+data/backups/*.dump
+data/processed/mimic_renal_cohort/
+
+# Temporary pipeline and test artifacts
+data/processed/mimic_renal_cohort.tmp-*/
+data/processed/stage_check_codex/
+.pytest-tmp-mimic/
