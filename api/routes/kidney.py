@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, Request, UploadFile
 
 from api.schemas import (
+    CTStudyPredictionResponse,
     MetadataResponse,
     TabularPredictionRequest,
     TabularPredictionResponse,
@@ -56,3 +57,33 @@ async def predict_ct_image(
 
     content = await file.read()
     return services.predict_image(content, filename=file.filename, ensemble=use_ensemble)
+
+
+@router.post("/image/study", response_model=CTStudyPredictionResponse)
+async def predict_ct_study(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    ensemble: Optional[bool] = Form(None),
+):
+    """Analyze submitted CT slices independently and return a conservative descriptive summary."""
+    use_ensemble = bool(ensemble) if ensemble is not None else request.query_params.get("ensemble", "").lower() in ("true", "1", "yes")
+    submitted = []
+    total_bytes = 0
+    for index, upload in enumerate(files):
+        filename = upload.filename or "unnamed-image"
+        if index >= services.MAX_STUDY_FILES:
+            submitted.append((filename, None, f"A study can contain at most {services.MAX_STUDY_FILES} images."))
+            continue
+        remaining = services.MAX_STUDY_SIZE_BYTES - total_bytes
+        if remaining <= 0:
+            submitted.append((filename, None, "The examination exceeds the 100 MB total upload limit."))
+            continue
+        read_limit = min(services.MAX_IMAGE_SIZE_BYTES + 1, remaining + 1)
+        content = await upload.read(read_limit)
+        if len(content) > remaining:
+            submitted.append((filename, None, "The examination exceeds the 100 MB total upload limit."))
+            total_bytes = services.MAX_STUDY_SIZE_BYTES
+        else:
+            total_bytes += len(content)
+            submitted.append((filename, content, None))
+    return services.predict_ct_study(submitted, ensemble=use_ensemble)

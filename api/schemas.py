@@ -109,3 +109,34 @@ class ImagePredictionResponse(BaseModel):
     message: str
     details: dict[str, Any] = Field(default_factory=dict)
     explanation: ImageExplanation
+
+
+class CTStudyImageResult(BaseModel):
+    image_id: str
+    filename: str
+    status: str
+    prediction: Optional[ImagePredictionResponse] = None
+    error: Optional[str] = None
+
+
+class CTStudyClassCount(BaseModel):
+    count: int
+    percentage: float
+
+
+class CTStudySummary(BaseModel):
+    status: str
+    accepted_image_count: int
+    submitted_image_count: int
+    class_distribution: dict[str, CTStudyClassCount]
+    mean_image_level_scores: dict[str, float] = Field(default_factory=dict)
+    mean_score_image_counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    minimum_accepted_images: int
+    disagreement_rule: str
+
+
+class CTStudyPredictionResponse(BaseModel):
+    examination_id: str
+    summary: CTStudySummary
+    images: list[CTStudyImageResult]

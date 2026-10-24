@@ -108,6 +108,30 @@ export interface ImagePredictionResponse {
   explanation: ImageExplanation;
 }
 
+export interface CTStudyImageResult {
+  image_id: string;
+  filename: string;
+  status: "accepted" | "review_required" | "ood_rejected" | "invalid_file" | "processing_error" | string;
+  prediction: ImagePredictionResponse | null;
+  error: string | null;
+}
+
+export interface CTStudyPredictionResponse {
+  examination_id: string;
+  summary: {
+    status: "study_review_required" | "descriptive_summary_available" | string;
+    accepted_image_count: number;
+    submitted_image_count: number;
+    class_distribution: Record<string, { count: number; percentage: number }>;
+    mean_image_level_scores: Record<string, number>;
+    mean_score_image_counts: Record<string, number>;
+    warnings: string[];
+    minimum_accepted_images: number;
+    disagreement_rule: string;
+  };
+  images: CTStudyImageResult[];
+}
+
 export interface ApiError {
   detail: string;
   status?: number;

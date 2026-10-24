@@ -5,6 +5,8 @@ Never duplicates preprocessing or retrains models; reuses existing loaders.
 
 import io
 import math
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -26,12 +28,27 @@ from api.schemas import (
     TabularExplanation,
     TabularMetadata,
     TabularPredictionResponse,
+    CTStudyClassCount,
+    CTStudyImageResult,
+    CTStudyPredictionResponse,
+    CTStudySummary,
 )
 from api.utils import clean_for_json, is_valid_image_extension, numpy_to_base64_png
 
 ORGAN = "kidney"
 SUPPORTED_IMAGE_FORMATS = ["png", "jpg", "jpeg", "bmp", "tif", "tiff"]
 MAX_IMAGE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
+MAX_STUDY_FILES = 12
+MAX_STUDY_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+MAX_IMAGE_PIXELS = 40_000_000
+CT_CLASS_NAMES = ["Cyst", "Normal", "Stone", "Tumor"]
+
+
+def _study_minimum_accepted_images() -> int:
+    try:
+        return max(1, int(os.getenv("CT_STUDY_MIN_ACCEPTED_IMAGES", "2")))
+    except ValueError:
+        return 2
 
 
 def get_tabular_module():
@@ -260,3 +277,116 @@ def predict_image(image_bytes: bytes, filename: Optional[str] = None, ensemble: 
             overlay=overlay_b64,
         ),
     )
+
+
+def predict_ct_study(
+    submitted: list[tuple[str, Optional[bytes], Optional[str]]], ensemble: bool = False,
+) -> CTStudyPredictionResponse:
+    """Run the unchanged single-image pipeline independently for each study file."""
+    examination_id = str(uuid.uuid4())
+    results: list[CTStudyImageResult] = []
+    total_bytes = 0
+    for index, (filename, content, validation_error) in enumerate(submitted):
+        image_id = str(uuid.uuid4())
+        name = Path(filename or "unnamed-image").name
+        error = validation_error
+        invalid_file = validation_error is not None
+        if index >= MAX_STUDY_FILES:
+            error = f"A study can contain at most {MAX_STUDY_FILES} images."
+            invalid_file = True
+        elif error is None and content is not None:
+            total_bytes += len(content)
+            if len(content) > MAX_IMAGE_SIZE_BYTES:
+                error = "Uploaded image exceeds the 25 MB per-image limit."
+                invalid_file = True
+            elif total_bytes > MAX_STUDY_SIZE_BYTES:
+                error = "The examination exceeds the 100 MB total upload limit."
+                invalid_file = True
+        if error is None and content is not None:
+            try:
+                with Image.open(io.BytesIO(content)) as image:
+                    width, height = image.size
+                    if width < 1 or height < 1 or width * height > MAX_IMAGE_PIXELS:
+                        raise HTTPException(status_code=400, detail="Image dimensions exceed the 40 megapixel limit.")
+                    image.verify()
+            except HTTPException as exc:
+                error = str(exc.detail)
+                invalid_file = True
+            except Exception:
+                error = "Uploaded file is not a valid, decodable image."
+                invalid_file = True
+        if error is None and content is not None:
+            try:
+                prediction = predict_image(content, filename=name, ensemble=ensemble)
+                status = {
+                    ACCEPTED: "accepted",
+                    REVIEW: "review_required",
+                    REJECTED: "ood_rejected",
+                }.get(prediction.status, "processing_error")
+                results.append(CTStudyImageResult(
+                    image_id=image_id, filename=name, status=status, prediction=prediction,
+                ))
+                continue
+            except HTTPException as exc:
+                error = str(exc.detail)
+                invalid_file = exc.status_code in (400, 413)
+            except Exception as exc:
+                error = f"Image processing failed ({type(exc).__name__})."
+        results.append(CTStudyImageResult(
+            image_id=image_id,
+            filename=name,
+            status="invalid_file" if invalid_file else "processing_error",
+            error=error or "Image content was not available for processing.",
+        ))
+
+    accepted = [row for row in results if row.status == "accepted" and row.prediction]
+    counts = {name: sum(row.prediction.label == name for row in accepted) for name in CT_CLASS_NAMES}
+    accepted_count = len(accepted)
+    distribution = {
+        name: CTStudyClassCount(
+            count=count,
+            percentage=round(count * 100 / accepted_count, 2) if accepted_count else 0.0,
+        )
+        for name, count in counts.items()
+    }
+    score_values: dict[str, list[float]] = {name: [] for name in CT_CLASS_NAMES}
+    for row in accepted:
+        probabilities = row.prediction.details.get("probabilities", {})
+        if isinstance(probabilities, dict):
+            for name in CT_CLASS_NAMES:
+                value = probabilities.get(name)
+                if isinstance(value, (int, float)) and math.isfinite(value) and 0 <= value <= 1:
+                    score_values[name].append(float(value))
+    mean_scores = {
+        name: round(sum(values) / len(values), 6)
+        for name, values in score_values.items() if values
+    }
+    warnings: list[str] = []
+    if accepted_count == 0:
+        warnings.append("No images passed the existing OOD and confidence checks; no class summary is available.")
+    if accepted_count < _study_minimum_accepted_images():
+        warnings.append(f"Fewer than {_study_minimum_accepted_images()} accepted images are available.")
+    if len({row.prediction.label for row in accepted}) > 1:
+        warnings.append("Accepted images have conflicting predicted classes; expert review is required.")
+    if any(row.status == "review_required" for row in results):
+        warnings.append("One or more images fell below the existing confidence threshold and need individual review.")
+    if any(row.status == "ood_rejected" for row in results):
+        warnings.append("One or more images were rejected by the existing out-of-distribution gate.")
+    if any(row.status in ("invalid_file", "processing_error") for row in results):
+        warnings.append("One or more submitted files could not be analyzed; they were not counted as Normal.")
+    must_review = (
+        accepted_count < _study_minimum_accepted_images()
+        or len({row.prediction.label for row in accepted}) > 1
+    )
+    summary = CTStudySummary(
+        status="study_review_required" if must_review else "descriptive_summary_available",
+        accepted_image_count=accepted_count,
+        submitted_image_count=len(submitted),
+        class_distribution=distribution,
+        mean_image_level_scores=mean_scores,
+        mean_score_image_counts={name: len(values) for name, values in score_values.items()},
+        warnings=warnings,
+        minimum_accepted_images=_study_minimum_accepted_images(),
+        disagreement_rule="Abstain when accepted images predict more than one class; no majority vote is used.",
+    )
+    return CTStudyPredictionResponse(examination_id=examination_id, summary=summary, images=results)

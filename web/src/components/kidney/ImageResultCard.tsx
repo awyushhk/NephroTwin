@@ -171,7 +171,7 @@ export default function ImageResultCard({ result, originalFile }: ImageResultCar
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
-              <span className="text-xs font-semibold text-slate-500 uppercase">P(Abnormal)</span>
+              <span className="text-xs font-semibold text-slate-500 uppercase">Abnormal model score</span>
               <div
                 className={cn(
                   "text-2xl font-bold mt-1",
@@ -181,7 +181,7 @@ export default function ImageResultCard({ result, originalFile }: ImageResultCar
                 {formatPercent(result.probability)}
               </div>
               <span className="text-xs text-slate-500 mt-1 block">
-                1 - P(Normal)
+                1 - P(Normal); not calibrated
               </span>
             </div>
           </div>

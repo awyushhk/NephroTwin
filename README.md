@@ -93,12 +93,46 @@ Two tabs:
    form (grouped into _About you_, _Measurements_, _Lab results_, _History and lifestyle_).
    The model handles missing values with KNN imputation. Results show CKD risk %, decision
    band, progress bar, and what moved the risk most.
-2. **CT Scan Analysis (Image)** — upload a kidney CT slice. The model classifies it as
-   Cyst / Normal / Stone / Tumor and shows the Grad-CAM overlay and class probabilities.
+2. **CT Scan Analysis (Image)** — upload one or more kidney CT slice images. Each image
+   gets an independent Cyst / Normal / Stone / Tumor result and Grad-CAM overlay; a study
+   summary describes accepted-image counts and abstains when results disagree or evidence is sparse.
 
 _Load example patient_ pre-fills the tabular form from
 [`frontend/assets/cascade_patient.json`](frontend/assets/cascade_patient.json).
 The first image of a session loads the network (~1.5 GB with PyTorch).
+
+### Multi-image CT examination
+
+`POST /api/kidney/image/study` accepts multipart `files` fields (up to 12 images) and the
+optional `ensemble=true` field. It returns an `examination_id`, one entry per submitted
+file (`image_id`, filename, status, and the existing single-image prediction when produced),
+and a descriptive summary. Per-image statuses are `accepted`, `review_required`,
+`ood_rejected`, `invalid_file`, or `processing_error`.
+
+The summary counts classes only among `accepted` images. It reports available mean
+image-level class scores separately from class counts; neither is a calibrated examination
+probability. By default at least two accepted images are required, and any disagreement
+between accepted predicted classes sets `study_review_required`; no majority vote is used.
+Set `CT_STUDY_MIN_ACCEPTED_IMAGES` in the API environment to change the minimum (default
+`2`). Each image is limited to 25 MB, each image is limited to 40 megapixels, and an
+examination is limited to 12 images and 100 MB total. The existing `POST /api/kidney/image`
+single-image endpoint and model pipeline remain available unchanged. The summary policy is
+descriptive, not clinically validated, and is not a study-level diagnosis.
+
+Run the backend and frontend from the repository root in separate terminals:
+
+```powershell
+# Terminal 1: activate the project environment and start FastAPI
+.\.venv\Scripts\Activate.ps1
+uvicorn api.main:app --reload --port 8000
+
+# Terminal 2: start Next.js
+cd web
+npm run dev
+```
+
+The backend still requires the existing image-model dependencies and checkpoint described
+above. No new package is required for multi-image analysis.
 
 ## Setup
 
