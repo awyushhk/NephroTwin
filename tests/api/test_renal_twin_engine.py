@@ -105,6 +105,64 @@ def test_timestamp_api_normalization_preserves_mimic_source_clock_time():
     assert utc_iso(returned) == "2154-08-09T05:50:00Z"
 
 
+def date_obs(ident, kind, value, day, sequence=None, exact_time=None):
+    return SimpleNamespace(
+        id=ident, measurement_type=kind, value=value,
+        unit="mL/min/1.73m2" if kind == "egfr" else "mmHg",
+        timestamp_precision="exact_time" if exact_time else "date_only",
+        observed_at=exact_time, observed_date=day,
+        source_sequence_number=sequence, source="MIMIC-IV v3.1 OMR" if not exact_time else "MIMIC-IV v3.1 labevents",
+        source_observation_id=f"event-{ident}",
+    )
+
+
+def test_same_day_omr_events_use_seq_num_without_fabricating_time():
+    from datetime import date
+    rows = [date_obs(2, "systolic_bp", 122, date(2150, 1, 3), 2), date_obs(1, "systolic_bp", 115, date(2150, 1, 3), 1)]
+    state = compute_state(rows, now=date(2150, 1, 3))
+    latest = state["measurements"]["systolic_bp"]["latest"]
+    assert latest["value"] == 122
+    assert latest["observed_at"] is None
+    assert latest["observed_date"] == "2150-01-03"
+    assert latest["timestamp_precision"] == "date_only"
+    assert latest["source_sequence_number"] == 2
+    assert state["latest_observation_at"] is None
+    assert state["latest_observation_date"] == "2150-01-03"
+
+
+def test_mixed_same_day_precision_leaves_current_value_unresolved():
+    from datetime import date
+    day = date(2150, 1, 3)
+    rows = [
+        date_obs(1, "egfr", 55, day, 1),
+        date_obs(2, "egfr", 57, day, exact_time=datetime(2150, 1, 3, 9, tzinfo=timezone.utc)),
+    ]
+    state = compute_state(rows, now=day)
+    result = state["measurements"]["egfr"]
+    assert result["latest"] is None
+    assert result["latest_temporal_ambiguity"] is True
+    assert len(result["latest_candidates"]) == 2
+    assert result["category"] is None
+    assert state["latest_observation_at"] is None
+    assert state["latest_observation_date"] == "2150-01-03"
+    assert any("ordering is unresolved" in warning for warning in state["warnings"])
+
+
+def test_date_only_observability_disables_elapsed_time_rate():
+    from datetime import date
+    rows = [
+        date_obs(1, "egfr", 70, date(2150, 1, 1), 1),
+        date_obs(2, "egfr", 60, date(2150, 3, 1), 1),
+        date_obs(3, "egfr", 55, date(2150, 5, 1), 1),
+    ]
+    result = compute_observability(rows, source_system="MIMIC-IV-v3.1", as_of=date(2150, 5, 1), minimum_trend_observations=3)
+    trend = result["measurements"]["egfr"]["trend"]
+    assert trend["sufficient"] is False
+    assert trend["rate_per_year"] is None
+    assert result["trend_series"]["egfr"]["points"][-1]["observed_at"] is None
+    assert result["trend_series"]["egfr"]["points"][-1]["observed_date"] == "2150-05-01"
+
+
 def test_scenario_comparison_requires_multiple_distinct_user_assumptions():
     comparison = ScenarioComparisonCreate(
         baseline_observation_id=10,

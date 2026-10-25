@@ -8,12 +8,24 @@ api/.env
 api/.env.*
 !api/.env.example
 
-# Local datasets, cohort exports, and database backups
+# Local datasets and cohort exports
 data/raw/
-data/backups/*.dump
 data/processed/mimic_renal_cohort/
+data/processed/mimic_renal_omr_bp/
+data/processed/mimic_renal_cohort.previous-*/
+
+# Local environments, database backups, and exports must stay out of commits
+**/.venv/
+*.dump
+data/backups/
 
 # Temporary pipeline and test artifacts
 data/processed/mimic_renal_cohort.tmp-*/
+data/processed/mimic_renal_cohort.hba1c-stage-*/
 data/processed/stage_check_codex/
+.mimic_renal_cohort.hba1c-stage-*/
+mimic_renal_cohort.hba1c-stage-*/
 .pytest-tmp-mimic/
+tests/.pytest-temp/
+tests/pytest-omr-temp/
+data/processed/.mimic_renal_omr_bp.stage-*/

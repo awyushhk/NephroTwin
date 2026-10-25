@@ -23,9 +23,9 @@ PATIENT_COLUMNS = ["internal_patient_id", "source_subject_id", "gender", "anchor
 OBSERVATION_COLUMNS = ["internal_patient_id", "source_subject_id", "source_observation_id", "mimic_item_id", "original_lab_label", "canonical_measurement", "original_value", "original_numeric_value", "original_unit", "standardized_value", "standardized_unit", "charttime", "charttime_timezone", "hadm_id", "admission_time", "discharge_time", "source_table", "provenance", "validation_flags"]
 MANIFEST_COLUMNS = ["internal_patient_id", "source_subject_id", "selection_status", "eligibility_criteria", "research_group", "research_group_evidence", "creatinine_observation_count", "observation_count_by_measurement", "missing_measurement_types", "earliest_observation_timestamp", "latest_observation_timestamp", "temporal_coverage_days", "data_quality_flags"]
 LAB_COLUMNS = ["labevent_id", "subject_id", "hadm_id", "itemid", "charttime", "value", "valuenum", "valueuom", "flag"]
-MAX_VALUES = {"creatinine": 100.0, "egfr": 250.0, "acr": 100000.0, "bun": 1000.0, "potassium": 30.0, "bicarbonate": 100.0, "urine_albumin": 100000.0, "urine_creatinine": 100000.0}
-MIN_VALUES = {"creatinine": 0.05, "egfr": 0.0, "acr": 0.0, "bun": 0.0, "potassium": 0.0, "bicarbonate": 0.0, "urine_albumin": 0.0, "urine_creatinine": 0.0}
-STD_UNITS = {"creatinine": "mg/dL", "egfr": "mL/min/1.73m2", "acr": "mg/g", "bun": "mg/dL", "potassium": "mmol/L", "bicarbonate": "mmol/L", "urine_albumin": "mg/dL", "urine_creatinine": "mg/dL"}
+MAX_VALUES = {"creatinine": 100.0, "egfr": 250.0, "acr": 100000.0, "bun": 1000.0, "potassium": 30.0, "bicarbonate": 100.0, "urine_albumin": 100000.0, "urine_creatinine": 100000.0, "hba1c": 100.0}
+MIN_VALUES = {"creatinine": 0.05, "egfr": 0.0, "acr": 0.0, "bun": 0.0, "potassium": 0.0, "bicarbonate": 0.0, "urine_albumin": 0.0, "urine_creatinine": 0.0, "hba1c": 0.1}
+STD_UNITS = {"creatinine": "mg/dL", "egfr": "mL/min/1.73m2", "acr": "mg/g", "bun": "mg/dL", "potassium": "mmol/L", "bicarbonate": "mmol/L", "urine_albumin": "mg/dL", "urine_creatinine": "mg/dL", "hba1c": "%"}
 
 
 def read_header(path: Path) -> list[str]:
@@ -39,6 +39,8 @@ def classify_lab_item(row: dict[str, str]) -> tuple[str | None, str]:
     fluid = " ".join((row.get("fluid") or "").lower().split())
     category = " ".join((row.get("category") or "").lower().split())
     if fluid == "blood":
+        if label == "% hemoglobin a1c" and category == "chemistry":
+            return "hba1c", "Exact percent Hemoglobin A1c label, Blood fluid, Chemistry category; identity percent only"
         if label in {"creatinine", "creatinine, serum", "creatinine, blood"}:
             return "creatinine", "Exact serum/blood creatinine label and Blood fluid"
         if label.startswith("estimated gfr"):
@@ -61,7 +63,7 @@ def classify_lab_item(row: dict[str, str]) -> tuple[str | None, str]:
 
 def is_renal_candidate(row: dict[str, str]) -> bool:
     text = " ".join((row.get(k) or "") for k in ("label", "fluid", "category")).lower()
-    return any(term in text for term in ("creatin", "gfr", "albumin", "urea nitrogen", "bun", "potassium", "bicarbonate"))
+    return any(term in text for term in ("creatin", "gfr", "albumin", "urea nitrogen", "bun", "potassium", "bicarbonate", "a1c", "glycated hemoglobin"))
 
 
 def normalize_unit(unit: str | None) -> str:
@@ -83,6 +85,7 @@ def standardize(measurement: str | None, value: float | None, unit: str | None) 
         "bicarbonate": {"mmol/l": (1.0, "identity mmol/L"), "meq/l": (1.0, "bicarbonate mEq/L numerically equals mmol/L")},
         "urine_albumin": {"mg/dl": (1.0, "identity mg/dL"), "mg/l": (0.1, "mg/L to mg/dL"), "mg/24 hr": (None, "unsupported timed excretion unit")},
         "urine_creatinine": {"mg/dl": (1.0, "identity mg/dL"), "mmol/l": (11.312, "creatinine mmol/L to mg/dL using 113.12 mg/mmol")},
+        "hba1c": {"%": (1.0, "identity; source is explicitly reported in percent")},
     }
     rule = rules.get(measurement, {}).get(u)
     if not rule or rule[0] is None:

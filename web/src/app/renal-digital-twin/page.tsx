@@ -27,13 +27,40 @@ type Patient = {
   observation_count: number;
   source_system?: string | null;
 };
+type ExamplePatient = {
+  id: number;
+  patient_code: string | null;
+  observation_count: number;
+  measurement_type_count: number;
+  measurement_counts: Partial<Record<MeasurementType, number>>;
+  index_date: string;
+  freshness_threshold_days: number;
+  focus: string;
+  trajectory_eligible: boolean;
+};
+type MeasurementType =
+  | "egfr"
+  | "creatinine"
+  | "acr"
+  | "bun"
+  | "potassium"
+  | "bicarbonate"
+  | "urine_albumin"
+  | "urine_creatinine"
+  | "systolic_bp"
+  | "diastolic_bp"
+  | "hba1c";
 type Observation = {
   id: number;
   patient_id: number;
-  measurement_type: string;
+  measurement_type: MeasurementType;
   value: number;
   unit: string;
-  observed_at: string;
+  observed_at: string | null;
+  observed_date?: string | null;
+  timestamp_precision?: "exact_time" | "date_only";
+  source_sequence_number?: number | null;
+  same_day_ordering_ambiguous?: boolean;
   source?: string | null;
   source_observation_id?: string | null;
   source_item_id?: string | null;
@@ -42,17 +69,24 @@ type Observation = {
   source_timestamp_timezone?: string | null;
   note?: string | null;
 };
-type ChartObservation = { id: number; measurement_type: string; value: number; unit: string; observed_at: string; source?: string | null; source_observation_id?: string | null };
+type ChartObservation = { id: number; measurement_type: MeasurementType; value: number; unit: string; observed_at: string | null; observed_date?: string | null; timestamp_precision?: "exact_time" | "date_only"; source_sequence_number?: number | null; same_day_ordering_ambiguous?: boolean; source?: string | null; source_observation_id?: string | null };
 type Measurement = {
   latest: {
     value: number;
     unit: string;
-    observed_at: string;
+    observed_at: string | null;
+    observed_date?: string | null;
+    timestamp_precision?: "exact_time" | "date_only";
+    source_sequence_number?: number | null;
     observation_id: number;
   } | null;
+  latest_temporal_ambiguity?: boolean;
+  latest_candidates?: { value: number; observed_at: string | null; observed_date?: string | null; timestamp_precision?: "exact_time" | "date_only" }[];
   previous: {
     value: number;
-    observed_at: string;
+    observed_at: string | null;
+    observed_date?: string | null;
+    timestamp_precision?: "exact_time" | "date_only";
     observation_id: number;
   } | null;
   count: number;
@@ -64,7 +98,7 @@ type Measurement = {
   category: string | null;
 };
 type TwinState = {
-  measurements: Record<string, Measurement>;
+  measurements: Partial<Record<MeasurementType, Measurement>>;
   warnings: string[];
   source_observation_ids: number[];
   data_completeness: {
@@ -83,6 +117,46 @@ type Scenario = {
   baseline_observation_id: number;
 };
 type ScenarioDraft = { key: string; rate: string };
+type TrajectorySimulationResult = {
+  method: string;
+  patient_id: number;
+  index_date: string;
+  horizon_years: number;
+  point_count: number;
+  baseline_inputs: Record<string, TrajectoryInputStatus>;
+  trajectory: { year: number; egfr: number; uacr: number }[];
+  time_to_egfr_below_15_years: number | null;
+  assumptions: { u: number; parameter_set: string; points: number; source_model: string };
+  eligibility: TrajectoryEligibility;
+  warnings: string[];
+  limitations: string[];
+};
+type TrajectoryInputStatus = {
+  value?: number;
+  unit?: string;
+  observed_date?: string | null;
+  observed_at?: string | null;
+  timestamp_precision?: "exact_time" | "date_only";
+  source_sequence_number?: number | null;
+  source?: string | null;
+  source_observation_id?: string | null;
+  age_days?: number | null;
+  age_precision?: "exact_time" | "calendar_day";
+  freshness_status: "fresh" | "stale" | "missing" | "temporally_ambiguous";
+  stale?: boolean;
+  reason?: string;
+};
+type TrajectoryEligibility = {
+  eligible: boolean;
+  baseline: { observation_id: number; value: number; unit: string; observed_date: string | null; observed_at: string | null; timestamp_precision: "exact_time" | "date_only" } | null;
+  index_date?: string;
+  freshness_threshold_days: number;
+  freshness_policy: string;
+  inputs: Record<string, TrajectoryInputStatus>;
+  blockers: string[];
+  warnings: string[];
+};
+type TrajectoryEligibilityState = { patientId: number; baselineId: string; report: TrajectoryEligibility };
 type ScenarioComparisonMetadata = {
   comparison_group_id: string;
   scenario_label: string;
@@ -100,7 +174,7 @@ function readScenarioComparisonMetadata(patientId: number) {
   }
 }
 const specs: Record<
-  string,
+  MeasurementType,
   { label: string; short: string; unit: string; color: string }
 > = {
   egfr: {
@@ -158,6 +232,12 @@ const specs: Record<
     unit: "mmHg",
     color: "#65a30d",
   },
+  hba1c: {
+    label: "HbA1c (%)",
+    short: "HbA1c",
+    unit: "%",
+    color: "#be123c",
+  },
 };
 
 const panel = "rounded-2xl border border-slate-200 bg-white shadow-sm";
@@ -177,6 +257,26 @@ function formatDate(value?: string | null, withTime = false) {
       ? { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }
       : { dateStyle: "medium", timeZone: "UTC" },
   ).format(date);
+}
+
+type ObservationDateFields = { observed_at?: string | null; observed_date?: string | null; timestamp_precision?: "exact_time" | "date_only" };
+
+function formatObservationDate(row: ObservationDateFields, withTime = false) {
+  if (row.timestamp_precision === "date_only") return formatDate(row.observed_date, false);
+  return formatDate(row.observed_at, withTime);
+}
+
+function observationCoordinate(row: ObservationDateFields, calendarDateAxis = false) {
+  const coordinateDate = row.observed_date ?? row.observed_at?.slice(0, 10);
+  if ((row.timestamp_precision === "date_only" || calendarDateAxis) && coordinateDate) {
+    // A calendar-day chart coordinate only; the API/storage never turns this into a timestamp.
+    return Date.parse(`${coordinateDate}T00:00:00Z`);
+  }
+  return row.observed_at ? new Date(row.observed_at).getTime() : Number.NaN;
+}
+
+function observationSortValue(row: ObservationDateFields) {
+  return observationCoordinate(row);
 }
 
 function formatUtcMonth(value: number) {
@@ -199,7 +299,7 @@ function TrendChart({
 }: {
   observations: ChartObservation[];
   scenarios: Scenario[];
-  measure: string;
+  measure: MeasurementType;
   timeBounds?: { start: number; end: number };
 }) {
   const rows = useMemo(
@@ -207,20 +307,20 @@ function TrendChart({
       observations
         .filter((row) => row.measurement_type === measure)
         .slice()
-        .sort(
-          (a, b) =>
-            new Date(a.observed_at).getTime() -
-            new Date(b.observed_at).getTime(),
-        ),
+        .sort((a, b) => observationSortValue(a) - observationSortValue(b)
+          || (a.source_sequence_number ?? 0) - (b.source_sequence_number ?? 0)
+          || a.id - b.id),
     [measure, observations],
   );
+  const calendarDateAxis = rows.some((row) => row.timestamp_precision === "date_only");
+  const hasUnresolvedOrdering = rows.some((row) => row.same_day_ordering_ambiguous);
   const actualScenarios = useMemo(
     () => (measure === "egfr" ? scenarios : []),
     [measure, scenarios],
   );
   const chart = useMemo(() => {
     const points = rows.map((row) => ({
-      time: new Date(row.observed_at).getTime(),
+      time: observationCoordinate(row, calendarDateAxis),
       value: row.value,
     }));
     const baselineTimes = actualScenarios
@@ -229,7 +329,7 @@ function TrendChart({
           (row) => row.id === scenario.baseline_observation_id,
         );
         return baseline
-          ? new Date(baseline.observed_at).getTime() +
+          ? observationCoordinate(baseline, calendarDateAxis) +
               scenario.horizon_months * 30.4375 * 86400000
           : null;
       })
@@ -256,7 +356,7 @@ function TrendChart({
     const low = rawLow - padding;
     const high = rawHigh + padding;
     return { start, span: end - start, low, high, points };
-  }, [actualScenarios, rows, timeBounds]);
+  }, [actualScenarios, calendarDateAxis, rows, timeBounds]);
 
   if (!chart || !rows.length) {
     return (
@@ -287,7 +387,7 @@ function TrendChart({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-slate-800">
-            {specs[measure]?.label ?? measure} over recorded time
+            {measure === "egfr" ? "Recorded eGFR and linear scenario paths" : `${specs[measure]?.label ?? measure} over recorded time`}
           </p>
           <p className="mt-0.5 text-xs text-slate-500">
             {rows.length} visible result{rows.length === 1 ? "" : "s"} ·{" "}
@@ -296,7 +396,7 @@ function TrendChart({
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-teal-700" />
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: specs[measure]?.color ?? "#0f766e" }} />
             Observed values
           </span>
           {actualScenarios.length > 0 && (
@@ -377,7 +477,7 @@ function TrendChart({
               (row) => row.id === scenario.baseline_observation_id,
             );
             if (!baseline) return null;
-            const startTime = new Date(baseline.observed_at).getTime();
+            const startTime = observationCoordinate(baseline, calendarDateAxis);
             const points = scenario.output.points
               .map((point) => {
                 const time = startTime + point.month * 30.4375 * 86400000;
@@ -397,7 +497,7 @@ function TrendChart({
               </polyline>
             );
           })}
-          {chart.points.length > 1 && (
+          {chart.points.length > 1 && !hasUnresolvedOrdering && (
             <polyline
               points={chart.points
                 .map((point) => `${58 + ((point.time - chart.start) / chart.span) * 666},${valueY(point.value, chart.low, chart.high)}`)
@@ -413,7 +513,7 @@ function TrendChart({
           {rows.map((row) => (
             <circle
               key={row.id}
-              cx={observationX(row.observed_at, chart.start, chart.span)}
+              cx={58 + ((observationCoordinate(row, calendarDateAxis) - chart.start) / chart.span) * 666}
               cy={valueY(row.value, chart.low, chart.high)}
               r="4.5"
               fill={specs[measure]?.color ?? "#0f766e"}
@@ -421,7 +521,7 @@ function TrendChart({
               strokeWidth="2"
             >
               <title>
-                {formatDate(row.observed_at, true)} · {row.value} {row.unit} ·
+                {formatObservationDate(row, true)}{row.source_sequence_number != null ? ` · sequence ${row.source_sequence_number}` : ""} · {row.value} {row.unit} ·
                 observation #{row.id}
               </title>
             </circle>
@@ -437,11 +537,72 @@ function TrendChart({
         </svg>
       </div>
       <p className="mt-1 text-[11px] leading-5 text-slate-500">
-        Dots mark recorded observations. The solid line is a visual guide between
-        measurements; no values were recorded between those timestamps. Dashed
-        lines, when shown, are hypothetical scenarios.
+        Dots mark recorded observations. Date-only points use calendar-date positions without a time of day; same-day date-only readings follow source sequence order. {hasUnresolvedOrdering ? "No line is shown because same-day mixed-precision ordering is unresolved." : "The solid line connects observations as a visual guide; it does not mean measurements were recorded between points."} Dashed lines, when shown, are hypothetical scenarios.
       </p>
     </div>
+  );
+}
+
+function MechanisticTrajectoryPlot({
+  points,
+  metric,
+  horizon,
+}: {
+  points: TrajectorySimulationResult["trajectory"];
+  metric: "egfr" | "uacr";
+  horizon: number;
+}) {
+  const label = metric === "egfr" ? "eGFR" : "UACR";
+  const unit = metric === "egfr" ? "mL/min/1.73m²" : "mg/g";
+  const color = metric === "egfr" ? "#7c3aed" : "#0f766e";
+  const values = points.map((point) => point[metric]);
+  const rawMin = Math.min(...values, ...(metric === "egfr" ? [15] : []));
+  const rawMax = Math.max(...values);
+  const padding = Math.max((rawMax - rawMin) * 0.08, Math.abs(rawMax) * 0.03, 1);
+  const low = Math.max(0, rawMin - padding);
+  const high = rawMax + padding;
+  const left = 84;
+  const right = 820;
+  const top = 24;
+  const bottom = 294;
+  const x = (year: number) => left + (year / horizon) * (right - left);
+  const y = (value: number) => bottom - ((value - low) / (high - low)) * (bottom - top);
+  const path = points.map((point) => `${x(point.year)},${y(point[metric])}`).join(" ");
+  const yTicks = Array.from({ length: 5 }, (_, index) => low + ((high - low) * index) / 4);
+  const xTicks = Array.from({ length: 6 }, (_, index) => (horizon * index) / 5);
+  const showsThreshold = metric === "egfr" && low <= 15 && high >= 15;
+
+  return (
+    <figure className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+      <figcaption className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-semibold text-slate-900">Simulated {label}</span>
+        <span className="text-xs text-slate-500">{unit} · model output · {points.length} points</span>
+      </figcaption>
+      <div className="w-full overflow-x-auto">
+        <svg viewBox="0 0 860 370" className="h-[300px] min-w-[680px] w-full sm:h-[360px]" role="img" aria-label={`Simulated ${label} over ${horizon} years`}>
+          {yTicks.map((tick, index) => <g key={`y-${index}`}>
+            <line x1={left} x2={right} y1={y(tick)} y2={y(tick)} stroke="#e2e8f0" strokeDasharray="4 5" />
+            <text x={left - 12} y={y(tick) + 4} textAnchor="end" fill="#64748b" fontSize="12">{tick.toFixed(tick >= 100 ? 0 : 1)}</text>
+          </g>)}
+          {xTicks.map((tick, index) => <g key={`x-${index}`}>
+            <line x1={x(tick)} x2={x(tick)} y1={top} y2={bottom} stroke="#f1f5f9" />
+            <text x={x(tick)} y={bottom + 22} textAnchor="middle" fill="#64748b" fontSize="12">{tick.toFixed(tick % 1 ? 1 : 0)}</text>
+          </g>)}
+          {showsThreshold && <g>
+            <line x1={left} x2={right} y1={y(15)} y2={y(15)} stroke="#b45309" strokeDasharray="7 5" strokeWidth="1.5" />
+            <text x={right - 4} y={y(15) - 7} textAnchor="end" fill="#92400e" fontSize="11">eGFR 15 reference threshold</text>
+          </g>}
+          <line x1={left} x2={right} y1={bottom} y2={bottom} stroke="#94a3b8" />
+          <line x1={left} x2={left} y1={top} y2={bottom} stroke="#94a3b8" />
+          <polyline points={path} fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={x(points[0].year)} cy={y(points[0][metric])} r="5" fill="#0f766e" stroke="white" strokeWidth="2" />
+          <circle cx={x(points.at(-1)!.year)} cy={y(points.at(-1)![metric])} r="5" fill={color} stroke="white" strokeWidth="2" />
+          <text x={(left + right) / 2} y="356" textAnchor="middle" fill="#475569" fontSize="12">Simulation year</text>
+          <text transform={`translate(18 ${(top + bottom) / 2}) rotate(-90)`} textAnchor="middle" fill="#475569" fontSize="12">{label} ({unit})</text>
+        </svg>
+      </div>
+      <p className="mt-2 text-[11px] leading-5 text-slate-500">Continuous curve is the simulator’s deterministic model output. It is hypothetical, not a record of measured values or a validated clinical forecast.</p>
+    </figure>
   );
 }
 
@@ -466,16 +627,26 @@ function metricTrend(measurement: Measurement) {
 
 export default function RenalDigitalTwinPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [examplePatients, setExamplePatients] = useState<ExamplePatient[]>([]);
+  const [examplePatientsLoading, setExamplePatientsLoading] = useState(true);
+  const [examplePatientsError, setExamplePatientsError] = useState("");
   const [patientId, setPatientId] = useState<number | "">("");
   const [observations, setObservations] = useState<Observation[]>([]);
+  const [chartObservations, setChartObservations] = useState<Observation[]>([]);
   const [timelineRows, setTimelineRows] = useState<Observation[]>([]);
   const [timelinePage, setTimelinePage] = useState(0);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [twin, setTwin] = useState<TwinState | null>(null);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [simulatorMode, setSimulatorMode] = useState<"linear" | "mechanistic">("linear");
+  const [trajectoryYears, setTrajectoryYears] = useState("10");
+  const [trajectoryLoading, setTrajectoryLoading] = useState(false);
+  const [trajectoryResult, setTrajectoryResult] = useState<TrajectorySimulationResult | null>(null);
+  const [trajectoryEligibilityState, setTrajectoryEligibilityState] = useState<TrajectoryEligibilityState | null>(null);
+  const [trajectoryEligibilityLoading, setTrajectoryEligibilityLoading] = useState(false);
   const [analysisWindowDays, setAnalysisWindowDays] = useState("all");
-  const [measurementFilter, setMeasurementFilter] = useState("egfr");
-  const [kind, setKind] = useState("egfr");
+  const [measurementFilter, setMeasurementFilter] = useState<MeasurementType>("egfr");
+  const [kind, setKind] = useState<MeasurementType>("egfr");
   const [value, setValue] = useState("");
   const [observedAt, setObservedAt] = useState("");
   const [source, setSource] = useState("");
@@ -518,6 +689,20 @@ export default function RenalDigitalTwinPage() {
     }
   }, []);
 
+  const refreshExamplePatients = useCallback(async () => {
+    setExamplePatientsLoading(true);
+    try {
+      const rows = await renalTwinRequest<ExamplePatient[]>("/patients/recommended-examples");
+      setExamplePatients(rows);
+      setExamplePatientsError("");
+    } catch (reason) {
+      setExamplePatients([]);
+      setExamplePatientsError(reason instanceof Error ? reason.message : "Could not find recommended example profiles.");
+    } finally {
+      setExamplePatientsLoading(false);
+    }
+  }, []);
+
   const refreshPatient = useCallback(async () => {
     if (!patientId) {
       setObservations([]);
@@ -546,7 +731,7 @@ export default function RenalDigitalTwinPage() {
         current && rows.some((row) => String(row.id) === current)
           ? current
           : String(
-              rows.find((row) => row.measurement_type === "egfr")?.id ?? "",
+              rows.filter((row) => row.measurement_type === "egfr").at(-1)?.id ?? "",
             ),
       );
       setError("");
@@ -564,9 +749,10 @@ export default function RenalDigitalTwinPage() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void refreshPatients();
+      void refreshExamplePatients();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [refreshPatients]);
+  }, [refreshExamplePatients, refreshPatients]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void refreshPatient();
@@ -665,6 +851,53 @@ export default function RenalDigitalTwinPage() {
     timelinePage,
   ]);
   useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      if (!patientId || loadingPatient || loadingPatients) {
+        if (active) setChartObservations([]);
+        return;
+      }
+      try {
+        const rows = await renalTwinRequest<Observation[]>(
+          `/patients/${patientId}/observations?limit=500&offset=0&recent=true&measurement_type=${encodeURIComponent(measurementFilter)}`,
+        );
+        if (active) setChartObservations(rows);
+      } catch (reason) {
+        if (active) {
+          setChartObservations([]);
+          setError(reason instanceof Error ? reason.message : "Could not load this measurement history.");
+        }
+      }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [loadingPatient, loadingPatients, measurementFilter, observations, patientId]);
+  useEffect(() => {
+    if (!patientId || !scenarioBase || loadingPatient) return;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setTrajectoryEligibilityLoading(true);
+      try {
+        const eligibility = await renalTwinRequest<TrajectoryEligibility>(
+          `/patients/${patientId}/trajectory/eligibility?baseline_observation_id=${encodeURIComponent(scenarioBase)}`,
+        );
+        if (active) setTrajectoryEligibilityState({ patientId, baselineId: scenarioBase, report: eligibility });
+      } catch (reason) {
+        if (active) {
+          setError(reason instanceof Error ? reason.message : "Could not assess trajectory input eligibility.");
+        }
+      } finally {
+        if (active) setTrajectoryEligibilityLoading(false);
+      }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [loadingPatient, patientId, scenarioBase]);
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       const localNow = new Date();
       localNow.setMinutes(localNow.getMinutes() - localNow.getTimezoneOffset());
@@ -678,7 +911,38 @@ export default function RenalDigitalTwinPage() {
     [observations],
   );
   const selectedPatient = patients.find((patient) => patient.id === patientId);
+  const trajectoryEligibility = trajectoryEligibilityState?.patientId === patientId && trajectoryEligibilityState.baselineId === scenarioBase
+    ? trajectoryEligibilityState.report
+    : null;
   const selectedMeasurement = specs[measurementFilter] ?? specs.egfr;
+  const trajectoryInputRows: { key: MeasurementType; label: string }[] = [
+    { key: "egfr", label: "eGFR baseline" },
+    { key: "acr", label: "Urine ACR / UACR" },
+    { key: "systolic_bp", label: "Systolic blood pressure" },
+    { key: "hba1c", label: "HbA1c" },
+  ];
+  const trajectoryInputsAvailable = Boolean(trajectoryEligibility?.eligible);
+  const trajectoryResultForPatient = trajectoryResult?.patient_id === patientId && trajectoryResult.eligibility.baseline?.observation_id === Number(scenarioBase) ? trajectoryResult : null;
+
+  async function runTrajectorySimulation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!patientId || !scenarioBase || !trajectoryInputsAvailable) return;
+    setTrajectoryLoading(true);
+    setTrajectoryResult(null);
+    setError("");
+    setNotice("");
+    try {
+      const result = await renalTwinRequest<TrajectorySimulationResult>(`/patients/${patientId}/trajectory`, {
+        method: "POST",
+        body: JSON.stringify({ years: Number(trajectoryYears), baseline_observation_id: Number(scenarioBase) }),
+      });
+      setTrajectoryResult(result);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The trajectory simulation could not complete.");
+    } finally {
+      setTrajectoryLoading(false);
+    }
+  }
 
   async function recomputeState() {
     if (!patientId) return;
@@ -891,10 +1155,20 @@ export default function RenalDigitalTwinPage() {
     }
   }
 
+  function loadExamplePatient(example: ExamplePatient) {
+    setPatientId(example.id);
+    setTimelinePage(0);
+    setSimulatorMode("mechanistic");
+    setTrajectoryResult(null);
+    setError("");
+    setNotice("");
+  }
+
   const analysisBounds = useMemo(() => {
-    const times = observations
-      .filter((row) => row.measurement_type === measurementFilter)
-      .map((row) => new Date(row.observed_at).getTime())
+    const selectedRows = chartObservations.filter((row) => row.measurement_type === measurementFilter);
+    const calendarDateAxis = selectedRows.some((row) => row.timestamp_precision === "date_only");
+    const times = selectedRows
+      .map((row) => observationCoordinate(row, calendarDateAxis))
       .filter(Number.isFinite);
     if (!times.length) return undefined;
     const end = Math.max(...times);
@@ -903,16 +1177,17 @@ export default function RenalDigitalTwinPage() {
       ? earliest
       : Math.max(earliest, end - Number(analysisWindowDays) * 86400000);
     return { start, end };
-  }, [analysisWindowDays, measurementFilter, observations]);
+  }, [analysisWindowDays, chartObservations, measurementFilter]);
 
   const timelineChartObservations = useMemo(() => {
     if (!analysisBounds) return [];
-    return observations.filter((row) => {
-      if (row.measurement_type !== measurementFilter) return false;
-      const time = new Date(row.observed_at).getTime();
+    const selectedRows = chartObservations.filter((row) => row.measurement_type === measurementFilter);
+    const calendarDateAxis = selectedRows.some((row) => row.timestamp_precision === "date_only");
+    return selectedRows.filter((row) => {
+      const time = observationCoordinate(row, calendarDateAxis);
       return Number.isFinite(time) && time >= analysisBounds.start && time <= analysisBounds.end;
     });
-  }, [analysisBounds, measurementFilter, observations]);
+  }, [analysisBounds, chartObservations, measurementFilter]);
 
   return (
     <main className="mx-auto w-full max-w-7xl space-y-6 pb-10">
@@ -941,6 +1216,7 @@ export default function RenalDigitalTwinPage() {
               onClick={() => {
                 void refreshPatients();
                 void refreshPatient();
+                void refreshExamplePatients();
               }}
               disabled={loadingPatients || loadingPatient}
               className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3.5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15 disabled:opacity-50"
@@ -1023,6 +1299,14 @@ export default function RenalDigitalTwinPage() {
           {notice}
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <span className="mr-1 text-xs font-semibold text-slate-700">Example patients</span>
+        {examplePatientsLoading ? <span className="text-xs text-slate-500">Finding simulation-eligible profiles…</span> : examplePatientsError ? <span role="status" className="text-xs text-amber-800">Examples unavailable; use the patient selector.</span> : !examplePatients.length ? <span className="text-xs text-slate-500">No profiles currently meet the simulation input rules.</span> : examplePatients.map((example, index) => <button key={example.id} type="button" aria-pressed={patientId === example.id} onClick={() => loadExamplePatient(example)} aria-label={`Load ${example.patient_code ?? `profile ${example.id}`}: ${example.focus}`} title={`${example.patient_code ?? `Profile ${example.id}`} · ${example.focus} · eligible for simulation`} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 ${patientId === example.id ? "bg-teal-700 text-white" : "bg-slate-100 text-slate-800 hover:bg-teal-50 hover:text-teal-900"}`}>
+          <Sparkles className={`h-3.5 w-3.5 ${patientId === example.id ? "text-white" : "text-teal-700"}`} />
+          {["Broad history", "ACR + HbA1c", "eGFR history"][index] ?? `Example ${index + 1}`}
+        </button>)}
+      </div>
 
       <section
         className={`${panel} p-5 sm:p-6`}
@@ -1110,7 +1394,7 @@ export default function RenalDigitalTwinPage() {
             <select
               id="measurement-kind"
               value={kind}
-              onChange={(event) => setKind(event.target.value)}
+              onChange={(event) => setKind(event.target.value as MeasurementType)}
               className={input}
             >
               {Object.entries(specs).map(([key, spec]) => (
@@ -1131,7 +1415,7 @@ export default function RenalDigitalTwinPage() {
               id="measurement-value"
               className={input}
               type="number"
-              min="0"
+              min={kind === "hba1c" ? "0.1" : "0"}
               step="any"
               value={value}
               onChange={(event) => setValue(event.target.value)}
@@ -1233,7 +1517,7 @@ export default function RenalDigitalTwinPage() {
                 : "No result"}
             </p>
             <p className="mt-1 text-xs text-slate-600">
-              {formatDate(twin?.measurements?.egfr?.latest?.observed_at, true)}
+              {twin?.measurements?.egfr?.latest ? formatObservationDate(twin.measurements.egfr.latest, true) : twin?.measurements?.egfr?.latest_temporal_ambiguity ? "Same-day ordering unresolved" : "—"}
             </p>
           </div>
           <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
@@ -1249,10 +1533,7 @@ export default function RenalDigitalTwinPage() {
                 : "No result"}
             </p>
             <p className="mt-1 text-xs text-slate-600">
-              {formatDate(
-                twin?.measurements?.creatinine?.latest?.observed_at,
-                true,
-              )}
+              {twin?.measurements?.creatinine?.latest ? formatObservationDate(twin.measurements.creatinine.latest, true) : twin?.measurements?.creatinine?.latest_temporal_ambiguity ? "Same-day ordering unresolved" : "—"}
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1291,7 +1572,7 @@ export default function RenalDigitalTwinPage() {
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {Object.entries(specs).map(([key, spec]) => {
-            const item = twin?.measurements?.[key];
+            const item = twin?.measurements?.[key as MeasurementType];
             return (
               <article
                 key={key}
@@ -1327,8 +1608,10 @@ export default function RenalDigitalTwinPage() {
                 </div>
                 <p className="mt-1.5 text-xs text-slate-500">
                   {item?.latest
-                    ? formatDate(item.latest.observed_at, true)
-                    : "No observation in this profile"}
+                    ? formatObservationDate(item.latest, true)
+                    : item?.latest_temporal_ambiguity
+                      ? `Same-day ordering unresolved across ${item.latest_candidates?.length ?? 0} observations`
+                      : "No observation in this profile"}
                 </p>
                 {item && metricTrend(item) && (
                   <p className="mt-2 text-xs font-medium">
@@ -1371,14 +1654,14 @@ export default function RenalDigitalTwinPage() {
               Renal measurement timeline
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              The chart filters the most recent 500 loaded observations by this
-              window; missing intervals remain gaps. Page through the full history below.
+              The chart shows up to 500 recent observations for the selected
+              measurement; missing intervals remain gaps. Page through the full history below.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <label htmlFor="measurement-filter" className="text-xs font-semibold text-slate-600">
               Measure
-              <select id="measurement-filter" value={measurementFilter} onChange={(event) => { setMeasurementFilter(event.target.value); setTimelinePage(0); }} className="ml-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800">
+              <select id="measurement-filter" value={measurementFilter} onChange={(event) => { setMeasurementFilter(event.target.value as MeasurementType); setTimelinePage(0); }} className="ml-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800">
                 {Object.entries(specs).map(([key, spec]) => <option key={key} value={key}>{spec.label}</option>)}
               </select>
             </label>
@@ -1432,7 +1715,9 @@ export default function RenalDigitalTwinPage() {
                   .map((row) => (
                     <tr key={row.id} className="hover:bg-slate-50">
                       <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-600">
-                        {formatDate(row.observed_at, true)}
+                        {formatObservationDate(row, true)}
+                        {row.source_sequence_number != null ? <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px]">Date only · seq {row.source_sequence_number}</span> : null}
+                        {row.same_day_ordering_ambiguous ? <span className="ml-2 text-amber-700">Same-day order unresolved</span> : null}
                       </td>
                       <td className="px-4 py-3 text-xs font-medium text-slate-800">
                         {specs[row.measurement_type]?.label ??
@@ -1542,7 +1827,28 @@ export default function RenalDigitalTwinPage() {
             </div>
           </div>
         </div>
-        <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
+        <div className="space-y-3 border-b border-violet-100 bg-violet-50/40 px-5 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-700">Simulation mode</span>
+            <button type="button" aria-pressed={simulatorMode === "linear"} onClick={() => setSimulatorMode("linear")} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${simulatorMode === "linear" ? "bg-violet-700 text-white" : "border border-slate-300 bg-white text-slate-600"}`}>Linear eGFR scenario</button>
+            <button type="button" aria-pressed={simulatorMode === "mechanistic"} disabled={!trajectoryInputsAvailable} onClick={() => setSimulatorMode("mechanistic")} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${simulatorMode === "mechanistic" ? "border-violet-700 bg-violet-700 text-white" : "border-slate-300 bg-white text-slate-600"}`}>Mechanistic trajectory simulation {trajectoryEligibilityLoading ? "· checking inputs" : trajectoryInputsAvailable ? "· eligible" : "· review required"}</button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {trajectoryInputRows.map(({ key, label }) => {
+              const inputStatus = trajectoryEligibility?.inputs[key];
+              return <div key={label} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                <p className="font-semibold text-slate-700">{label}</p>
+                {trajectoryEligibilityLoading ? <p className="mt-1 text-slate-500">Checking selected baseline…</p> : inputStatus?.value != null ? <>
+                  <p className="mt-1 text-slate-700">{inputStatus.value} {inputStatus.unit} · {formatObservationDate(inputStatus, true)}</p>
+                  <p className={`mt-1 font-semibold ${inputStatus.freshness_status === "fresh" ? "text-emerald-700" : inputStatus.freshness_status === "stale" ? "text-amber-700" : "text-rose-700"}`}>{inputStatus.freshness_status.replaceAll("_", " ")}{inputStatus.age_days != null ? ` · ${inputStatus.age_days} ${inputStatus.age_precision === "exact_time" ? "days" : "calendar days"} before index` : ""}{inputStatus.source_sequence_number != null ? ` · seq ${inputStatus.source_sequence_number}` : ""}</p>
+                </> : <p className="mt-1 text-rose-700">{inputStatus?.reason ?? "Eligibility assessment unavailable."}</p>}
+              </div>;
+            })}
+          </div>
+          <p className="text-xs leading-5 text-amber-900">Select an eGFR index below. Inputs after that index are excluded; ambiguous same-day date-only versus exact-time readings and stale required inputs block simulation. The freshness window is {trajectoryEligibility?.freshness_threshold_days ?? 90} days, an adjustable data-review policy rather than a clinically validated cutoff. Differently dated readings within that window are allowed but are not assumed simultaneous. This simulation is research-only, not a validated patient-specific forecast.</p>
+          {trajectoryEligibility?.blockers.map((blocker) => <p key={blocker} className="text-xs font-medium text-rose-800">{blocker}</p>)}
+        </div>
+        {simulatorMode === "linear" ? <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
           <form
             onSubmit={(event) => void saveScenario(event)}
             className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5"
@@ -1569,7 +1875,7 @@ export default function RenalDigitalTwinPage() {
                 </option>
                 {eGfrObservations.map((row) => (
                   <option key={row.id} value={row.id}>
-                    {row.value} · {formatDate(row.observed_at)}
+                    {row.value} · {formatObservationDate(row)}
                   </option>
                 ))}
               </select>
@@ -1652,7 +1958,7 @@ export default function RenalDigitalTwinPage() {
                           <p className="mt-1 text-xs text-violet-900">
                             Starting from a recorded eGFR of{" "}
                             {baseline?.value ?? "—"} on{" "}
-                            {formatDate(baseline?.observed_at)}, assuming{" "}
+                            {baseline ? formatObservationDate(baseline) : "—"}, assuming{" "}
                             {scenario.assumptions.rate_per_year} mL/min/1.73m²/year for{" "}
                             {scenario.horizon_months} months.
                           </p>
@@ -1714,8 +2020,52 @@ export default function RenalDigitalTwinPage() {
               </div>
             )}
           </div>
-        </div>
-        {eGfrObservations.length > 0 && (
+        </div> : <div className="space-y-5 p-5 sm:p-6">
+          <form onSubmit={(event) => void runTrajectorySimulation(event)} className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/50 p-4 sm:p-5">
+            <div>
+              <label htmlFor="trajectory-baseline" className="text-xs font-semibold text-slate-700">Selected eGFR baseline / index date</label>
+              <select id="trajectory-baseline" className={input} required value={scenarioBase} onChange={(event) => { setScenarioBase(event.target.value); setTrajectoryResult(null); }} disabled={eGfrObservations.length === 0 || trajectoryLoading}>
+                <option value="">Choose an eGFR observation</option>
+                {eGfrObservations.map((row) => <option key={row.id} value={row.id}>{row.value} {row.unit} · {formatObservationDate(row, true)}</option>)}
+              </select>
+              {trajectoryEligibility?.baseline && <p className="mt-1 text-[11px] text-slate-500">Index date: {formatObservationDate(trajectoryEligibility.baseline, true)}</p>}
+            </div>
+            <div>
+              <label htmlFor="trajectory-horizon" className="text-xs font-semibold text-slate-700">Simulation horizon</label>
+              <select id="trajectory-horizon" className={input} value={trajectoryYears} onChange={(event) => setTrajectoryYears(event.target.value)}>
+                {[1, 5, 10, 15].map((years) => <option key={years} value={years}>{years} {years === 1 ? "year" : "years"}</option>)}
+              </select>
+            </div>
+            <p className="text-xs leading-5 text-slate-600">The selected eGFR observation defines the index. Other required values must be valid, no later than that index, and within the configured freshness window. Exact timestamps are compared only with exact timestamps; same-day date-only versus exact-time order is treated as ambiguous.</p>
+            <button className={`${primaryButton} w-full bg-violet-700 hover:bg-violet-800`} disabled={!patientId || !scenarioBase || !trajectoryInputsAvailable || trajectoryEligibilityLoading || trajectoryLoading}>
+              {trajectoryLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              {trajectoryLoading ? "Running simulation…" : "Run trajectory simulation"}
+            </button>
+            <p className="text-[11px] leading-5 text-slate-500">Uses the module’s bundled trial-anchored defaults with u=0 and 400 points. No patient-specific fitting, training, or treatment effect is applied.</p>
+          </form>
+          <div className="min-h-[24rem] min-w-0 rounded-2xl border border-violet-200 bg-white p-4 sm:p-5">
+            {!trajectoryResultForPatient ? <div className="flex h-full min-h-80 flex-col items-center justify-center text-center">
+              <Activity className="h-7 w-7 text-violet-600" />
+              <p className="mt-3 text-sm font-semibold text-slate-800">{trajectoryInputsAvailable ? "No simulated trajectory yet" : "Required inputs are missing or ambiguous"}</p>
+              <p className="mt-1 max-w-md text-xs leading-5 text-slate-500">{trajectoryInputsAvailable ? "Choose a horizon and run the on-demand research simulation." : "A valid, unambiguous eGFR, urine ACR, systolic blood pressure, and HbA1c result are required. No values will be imputed."}</p>
+            </div> : <div className="space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div><p className="text-sm font-semibold text-violet-950">Simulated renal trajectory · {trajectoryResultForPatient.horizon_years} years</p><p className="mt-1 text-xs text-slate-500">{trajectoryResultForPatient.point_count} model points · separate from recorded observations</p></div>
+                {trajectoryResultForPatient.time_to_egfr_below_15_years != null && <span className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">eGFR &lt;15 threshold in {trajectoryResultForPatient.time_to_egfr_below_15_years.toFixed(2)} years (model output)</span>}
+              </div>
+              {trajectoryResultForPatient.time_to_egfr_below_15_years == null && <p className="text-xs text-slate-500">The model did not cross below eGFR 15 within this simulation horizon.</p>}
+              <div className="space-y-5">
+                <MechanisticTrajectoryPlot points={trajectoryResultForPatient.trajectory} metric="egfr" horizon={trajectoryResultForPatient.horizon_years} />
+                <MechanisticTrajectoryPlot points={trajectoryResultForPatient.trajectory} metric="uacr" horizon={trajectoryResultForPatient.horizon_years} />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {Object.entries(trajectoryResultForPatient.baseline_inputs).map(([kind, reading]) => <div key={kind} className="rounded-lg bg-slate-50 px-3 py-2 text-xs"><span className="font-semibold text-slate-700">{specs[kind as MeasurementType]?.label ?? kind}:</span> {reading.value} {reading.unit} · {formatObservationDate(reading, true)}{reading.stale ? <span className="ml-1 font-semibold text-amber-700">stale</span> : null}</div>)}
+              </div>
+              {[...trajectoryResultForPatient.warnings, ...trajectoryResultForPatient.limitations].map((warning) => <p key={warning} className="text-xs leading-5 text-amber-900">{warning}</p>)}
+            </div>}
+          </div>
+        </div>}
+        {simulatorMode === "linear" && eGfrObservations.length > 0 && (
           <div className="px-5 pb-5 sm:px-6 sm:pb-6">
             <TrendChart
               observations={observations}

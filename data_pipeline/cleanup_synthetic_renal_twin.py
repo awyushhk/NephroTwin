@@ -77,7 +77,7 @@ def cleanup(execute: bool, backup: Path = DEFAULT_BACKUP) -> dict:
         raise RuntimeError(f"Refusing database {engine.url.database!r}; expected renal_twin_db.")
     with engine.connect() as connection:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
-    if revision != "0003_timestamp_provenance_length":
+    if revision not in {"0003_timestamp_provenance_length", "0004_date_precision_observations"}:
         raise RuntimeError(f"Unexpected Alembic revision {revision!r}; refusing cleanup.")
     result = {"mode": "execute" if execute else "dry_run_no_writes", "database": "renal_twin_db", "alembic_revision": revision, "backup": backup_report}
     with factory() as session:

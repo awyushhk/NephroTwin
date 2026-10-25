@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -25,7 +25,7 @@ class PatientOut(BaseModel):
     observation_count: int = 0
 
 class ObservationCreate(BaseModel):
-    measurement_type: Literal["creatinine", "egfr", "acr", "bun", "potassium", "bicarbonate", "urine_albumin", "urine_creatinine", "systolic_bp", "diastolic_bp"]
+    measurement_type: Literal["creatinine", "egfr", "acr", "bun", "potassium", "bicarbonate", "urine_albumin", "urine_creatinine", "systolic_bp", "diastolic_bp", "hba1c"]
     value: float
     unit: str = Field(max_length=32)
     observed_at: datetime
@@ -40,7 +40,10 @@ class ObservationOut(BaseModel):
     measurement_type: str
     value: float
     unit: str
-    observed_at: datetime
+    observed_at: datetime | None
+    observed_date: date | None = None
+    timestamp_precision: Literal["exact_time", "date_only"] = "exact_time"
+    source_sequence_number: int | None = None
     source: str | None
     note: str | None
     created_at: datetime
@@ -71,3 +74,7 @@ class ScenarioComparisonCreate(BaseModel):
         if len(set(labels)) != len(labels):
             raise ValueError("Scenario labels must be unique within a comparison.")
         return self
+
+class NephroQSimulationCreate(BaseModel):
+    years: float = Field(default=15, gt=0, le=15, allow_inf_nan=False)
+    baseline_observation_id: int | None = Field(default=None, gt=0)

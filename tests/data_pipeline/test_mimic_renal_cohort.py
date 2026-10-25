@@ -16,6 +16,9 @@ def test_exact_dictionary_mapping_and_ambiguous_fluids():
     assert classify_lab_item({"label": "Creatinine, Ascites", "fluid": "Ascites", "category": "Chemistry"})[0] is None
     assert classify_lab_item({"label": "Albumin/Creatinine, Urine", "fluid": "Urine", "category": "Chemistry"})[0] == "acr"
     assert classify_lab_item({"label": "Albumin, Urine", "fluid": "Urine", "category": "Chemistry"})[0] == "urine_albumin"
+    assert classify_lab_item({"label": "% Hemoglobin A1c", "fluid": "Blood", "category": "Chemistry"})[0] == "hba1c"
+    assert classify_lab_item({"label": "Absolute A1c", "fluid": "Blood", "category": "Chemistry"})[0] is None
+    assert classify_lab_item({"label": "Glycated Hemoglobin", "fluid": "Blood", "category": "Chemistry"})[0] is None
 
 def test_validated_units_and_unknown_units():
     val, unit, rule = standardize("creatinine", 88.4, "umol/L")
@@ -24,6 +27,9 @@ def test_validated_units_and_unknown_units():
     assert standardize("acr", 30, "mg/g")[:2] == (30, "mg/g")
     assert standardize("urine_albumin", 10, "mystery-unit")[0] is None
     assert standardize("creatinine", float("inf"), "mg/dL")[0] is None
+    assert standardize("hba1c", 6.5, "%")[:2] == (6.5, "%")
+    assert standardize("hba1c", 6.5, "mmol/mol")[0] is None
+    assert standardize("hba1c", 0.0, "%")[0] is None
 
 def test_missing_numeric_values_remain_missing():
     assert parse_numeric("") is None

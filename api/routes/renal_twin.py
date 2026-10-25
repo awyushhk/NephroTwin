@@ -1,15 +1,17 @@
 """Persistent patient observations and deterministic renal twin APIs."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from collections import defaultdict
 import os
 import uuid
+from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, func, select
+from sqlalchemy import case, desc, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from api.database import get_session
 from api.models import Patient, RenalObservation, TwinState, TwinUpdateHistory, Scenario
-from api.schemas_renal import PatientCreate, ObservationCreate, ScenarioComparisonCreate, ScenarioCreate
-from api.renal_twin import ALGORITHM_VERSION, MEASUREMENTS, compute_observability, compute_state, simulate_egfr, utc_datetime, utc_iso, validate_measurement
+from api.schemas_renal import NephroQSimulationCreate, PatientCreate, ObservationCreate, ScenarioComparisonCreate, ScenarioCreate
+from api.renal_twin import ALGORITHM_VERSION, MEASUREMENTS, compute_observability, compute_state, observation_date, observation_order_key, observation_payload, observation_precision, simulate_egfr, utc_datetime, utc_iso, validate_measurement
 
 router = APIRouter(prefix="/renal-twin", tags=["Renal Digital Twin"])
 MIMIC_SOURCE_SYSTEM = "MIMIC-IV-v3.1"
@@ -22,15 +24,53 @@ def _setting(name, default, minimum, maximum):
 def db_error(exc):
     raise HTTPException(status_code=503, detail="PostgreSQL unavailable. Verify DATABASE_URL, credentials, service status, and migrations.") from exc
 
+
+def _ordered_rows(session, patient_id, measurement_type=None):
+    statement = select(RenalObservation).where(RenalObservation.patient_id == patient_id)
+    if measurement_type is not None:
+        statement = statement.where(RenalObservation.measurement_type == measurement_type)
+    return sorted(session.scalars(statement).all(), key=observation_order_key)
+
+
+def _as_of_for_patient(patient, rows):
+    if patient and patient.source_system == MIMIC_SOURCE_SYSTEM and rows:
+        if any(observation_precision(row) == "date_only" for row in rows):
+            return max(observation_date(row) for row in rows)
+        return max(utc_datetime(row.observed_at) for row in rows)
+    return datetime.now(timezone.utc)
+
+
+def _serialize_observation(row, ambiguous_dates=frozenset()):
+    return {
+        "id": row.id, "patient_id": row.patient_id,
+        "measurement_type": row.measurement_type, "value": row.value, "unit": row.unit,
+        **observation_payload(row),
+        "same_day_ordering_ambiguous": (observation_date(row), row.measurement_type) in ambiguous_dates,
+        "source": row.source, "note": row.note, "created_at": utc_iso(row.created_at),
+        "source_system": row.source_system, "source_observation_id": row.source_observation_id,
+        "source_item_id": row.source_item_id, "source_original_label": row.source_original_label,
+        "source_charttime_text": row.source_charttime_text,
+        "source_timestamp_timezone": row.source_timestamp_timezone,
+        "source_original_value": row.source_original_value,
+    }
+
+
+def _ambiguous_same_day_dates(session, patient_id, measurement_type=None):
+    precision_count = func.count(func.distinct(RenalObservation.timestamp_precision))
+    statement = select(RenalObservation.observed_date, RenalObservation.measurement_type).where(RenalObservation.patient_id == patient_id)
+    if measurement_type is not None:
+        statement = statement.where(RenalObservation.measurement_type == measurement_type)
+    statement = statement.group_by(RenalObservation.observed_date, RenalObservation.measurement_type).having(precision_count > 1)
+    return set(session.execute(statement).all())
+
 def rebuild(session, patient_id, reason):
     patient = session.get(Patient, patient_id)
-    rows = list(session.scalars(select(RenalObservation).where(RenalObservation.patient_id == patient_id).order_by(RenalObservation.observed_at, RenalObservation.id)))
+    rows = _ordered_rows(session, patient_id)
     # MIMIC charttimes are shifted/deidentified and can lie after the host date.
     # Use the dataset's latest event as its as-of point without changing source times.
-    as_of = max((row.observed_at for row in rows), default=datetime.now(timezone.utc)) if patient and patient.source_system == MIMIC_SOURCE_SYSTEM else datetime.now(timezone.utc)
-    rows = [row for row in rows if row.observed_at <= as_of]
+    as_of = _as_of_for_patient(patient, rows)
     snapshot = compute_state(rows, now=as_of)
-    latest = datetime.fromisoformat(snapshot["latest_observation_at"]) if snapshot["latest_observation_at"] else None
+    latest = datetime.fromisoformat(snapshot["latest_observation_at"].replace("Z", "+00:00")) if snapshot["latest_observation_at"] else None
     state = session.get(TwinState, patient_id)
     if state is None:
         state = TwinState(patient_id=patient_id, state_snapshot=snapshot, algorithm_version=ALGORITHM_VERSION, latest_observation_at=latest)
@@ -50,6 +90,57 @@ def patients(session: Session = Depends(get_session)):
         return [{"id": p.id, "patient_code": p.patient_code, "created_at": p.created_at,
                  "source_system": p.source_system, "observation_count": counts.get(p.id, 0)} for p in patient_rows]
     except SQLAlchemyError as exc: db_error(exc)
+
+@router.get("/patients/recommended-examples")
+def recommended_example_patients(session: Session = Depends(get_session)):
+    """Find rich MIMIC profiles currently eligible for the NephroQ example mode."""
+    try:
+        from api.nephroq import REQUIRED_INPUTS, rank_example_profiles
+
+        patient_rows = session.scalars(
+            select(Patient).where(Patient.source_system == MIMIC_SOURCE_SYSTEM).order_by(Patient.id)
+        ).all()
+        counts_by_patient = defaultdict(dict)
+        for patient_id, kind, count in session.execute(
+            select(RenalObservation.patient_id, RenalObservation.measurement_type, func.count(RenalObservation.id))
+            .where(RenalObservation.patient_id.in_([patient.id for patient in patient_rows]))
+            .group_by(RenalObservation.patient_id, RenalObservation.measurement_type)
+        ):
+            counts_by_patient[patient_id][kind] = int(count)
+        candidate_ids = [
+            patient_id for patient_id, counts in counts_by_patient.items()
+            if all(counts.get(kind, 0) for kind in REQUIRED_INPUTS)
+        ]
+        if not candidate_ids:
+            return []
+
+        observations_by_patient = defaultdict(list)
+        selected = session.execute(
+            select(
+                RenalObservation.patient_id, RenalObservation.id, RenalObservation.measurement_type,
+                RenalObservation.value, RenalObservation.unit, RenalObservation.observed_at,
+                RenalObservation.observed_date, RenalObservation.timestamp_precision,
+                RenalObservation.source_sequence_number, RenalObservation.source,
+                RenalObservation.source_observation_id,
+            ).where(
+                RenalObservation.patient_id.in_(candidate_ids),
+                RenalObservation.measurement_type.in_(tuple(REQUIRED_INPUTS)),
+            )
+        )
+        for row in selected:
+            patient_id, ident, kind, value, unit, observed_at, observed_date, precision, sequence, source, source_id = row
+            observations_by_patient[patient_id].append(SimpleNamespace(
+                id=ident, patient_id=patient_id, measurement_type=kind, value=value, unit=unit,
+                observed_at=observed_at, observed_date=observed_date, timestamp_precision=precision,
+                source_sequence_number=sequence, source=source, source_observation_id=source_id,
+            ))
+
+        return rank_example_profiles(
+            patient_rows, counts_by_patient, observations_by_patient,
+            _setting("RENAL_OBSERVABILITY_STALE_DAYS", 90, 1, 10000),
+        )
+    except SQLAlchemyError as exc:
+        db_error(exc)
 
 @router.post("/patients", status_code=201)
 def create_patient(payload: PatientCreate, session: Session = Depends(get_session)):
@@ -72,22 +163,26 @@ def observations(patient_id: int, limit: int = Query(100, ge=1, le=500), offset:
     if not session.get(Patient, patient_id): raise HTTPException(404, "Patient not found.")
     if measurement_type is not None and measurement_type not in MEASUREMENTS:
         raise HTTPException(422, "Unsupported measurement type.")
-    order = (desc(RenalObservation.observed_at), desc(RenalObservation.id)) if recent else (RenalObservation.observed_at, RenalObservation.id)
     statement = select(RenalObservation).where(RenalObservation.patient_id == patient_id)
     if measurement_type is not None:
         statement = statement.where(RenalObservation.measurement_type == measurement_type)
+    order = (
+        (desc(RenalObservation.observed_date), desc(case((RenalObservation.timestamp_precision == "exact_time", 0), else_=1)), desc(RenalObservation.observed_at), desc(RenalObservation.source_sequence_number), desc(RenalObservation.id))
+        if recent else
+        (RenalObservation.observed_date, case((RenalObservation.timestamp_precision == "exact_time", 0), else_=1), RenalObservation.observed_at, RenalObservation.source_sequence_number, RenalObservation.id)
+    )
     rows = session.scalars(statement.order_by(*order).offset(offset).limit(limit)).all()
     if recent:
         rows.reverse()
-    return [{"id": x.id, "patient_id": x.patient_id, "measurement_type": x.measurement_type, "value": x.value, "unit": x.unit, "observed_at": utc_iso(x.observed_at), "source": x.source, "note": x.note, "created_at": utc_iso(x.created_at), "source_system": x.source_system, "source_observation_id": x.source_observation_id, "source_item_id": x.source_item_id, "source_original_label": x.source_original_label, "source_charttime_text": x.source_charttime_text, "source_timestamp_timezone": x.source_timestamp_timezone} for x in rows]
+    ambiguous_dates = _ambiguous_same_day_dates(session, patient_id, measurement_type)
+    return [_serialize_observation(x, ambiguous_dates) for x in rows]
 
 @router.get("/patients/{patient_id}/analysis")
 def analysis(patient_id: int, trend_window_days: int = Query(365, ge=0, le=10000), session: Session = Depends(get_session)):
     patient = session.get(Patient, patient_id)
     if not patient: raise HTTPException(404, "Patient not found.")
-    rows = session.scalars(select(RenalObservation).where(RenalObservation.patient_id == patient_id).order_by(RenalObservation.observed_at, RenalObservation.id)).all()
-    latest = max((utc_datetime(row.observed_at) for row in rows), default=None)
-    as_of = latest if patient.source_system == MIMIC_SOURCE_SYSTEM and latest else datetime.now(timezone.utc)
+    rows = _ordered_rows(session, patient_id)
+    as_of = _as_of_for_patient(patient, rows)
     return compute_observability(
         rows,
         source_system=patient.source_system,
@@ -100,6 +195,31 @@ def analysis(patient_id: int, trend_window_days: int = Query(365, ge=0, le=10000
         stale_after_days=_setting("RENAL_OBSERVABILITY_STALE_DAYS", 90, 1, 10000),
     )
 
+@router.get("/patients/{patient_id}/trajectory/eligibility")
+@router.get("/patients/{patient_id}/nephroq/eligibility", include_in_schema=False)
+def nephroq_eligibility(patient_id: int, baseline_observation_id: int | None = Query(None, gt=0), session: Session = Depends(get_session)):
+    if not session.get(Patient, patient_id):
+        raise HTTPException(404, "Patient not found.")
+    rows = _ordered_rows(session, patient_id)
+    from api.nephroq import assess_nephroq_inputs
+    return assess_nephroq_inputs(rows, baseline_observation_id, _setting("RENAL_OBSERVABILITY_STALE_DAYS", 90, 1, 10000))
+
+@router.post("/patients/{patient_id}/trajectory")
+@router.post("/patients/{patient_id}/nephroq", include_in_schema=False)
+def nephroq_simulation(patient_id: int, payload: NephroQSimulationCreate, session: Session = Depends(get_session)):
+    patient_obj = session.get(Patient, patient_id)
+    if not patient_obj:
+        raise HTTPException(404, "Patient not found.")
+    rows = _ordered_rows(session, patient_id)
+    try:
+        from api.nephroq import NephroQInputError, simulate_nephroq
+        return simulate_nephroq(rows, patient_id, payload.years, payload.baseline_observation_id,
+                                _setting("RENAL_OBSERVABILITY_STALE_DAYS", 90, 1, 10000))
+    except NephroQInputError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
 @router.post("/patients/{patient_id}/observations", status_code=201)
 def add_observation(patient_id: int, payload: ObservationCreate, session: Session = Depends(get_session)):
     if not session.get(Patient, patient_id): raise HTTPException(404, "Patient not found.")
@@ -109,8 +229,10 @@ def add_observation(patient_id: int, payload: ObservationCreate, session: Sessio
     if observed.tzinfo is None: raise HTTPException(422, "observed_at must include a timezone offset.")
     if observed.astimezone(timezone.utc) > datetime.now(timezone.utc): raise HTTPException(422, "Observation time cannot be in the future.")
     try:
+        event_time = observed.astimezone(timezone.utc)
         row = RenalObservation(patient_id=patient_id, measurement_type=payload.measurement_type, value=payload.value, unit=payload.unit,
-                               observed_at=observed.astimezone(timezone.utc), source=payload.source, note=payload.note, idempotency_key=payload.idempotency_key)
+                               observed_at=event_time, observed_date=event_time.date(), timestamp_precision="exact_time",
+                               source=payload.source, note=payload.note, idempotency_key=payload.idempotency_key)
         session.add(row); session.flush()
         snapshot = rebuild(session, patient_id, "observation_added")
         session.commit(); session.refresh(row)
@@ -127,9 +249,13 @@ def state(patient_id: int, session: Session = Depends(get_session)):
     if not obj: raise HTTPException(404, "Patient not found.")
     if not obj.observations: return compute_state([])
     item = session.get(TwinState, patient_id)
-    if item: return item.state_snapshot
-    rows = list(session.scalars(select(RenalObservation).where(RenalObservation.patient_id == patient_id).order_by(RenalObservation.observed_at, RenalObservation.id)))
-    as_of = max((row.observed_at for row in rows), default=datetime.now(timezone.utc)) if obj.source_system == MIMIC_SOURCE_SYSTEM else datetime.now(timezone.utc)
+    # Older persisted snapshots may predate a newly supported measurement (for
+    # example hba1c). Rebuild in memory so the API returns a complete shape;
+    # do not persist a read-time refresh or alter the stored audit history.
+    if item and set(MEASUREMENTS).issubset(item.state_snapshot.get("measurements", {})):
+        return item.state_snapshot
+    rows = _ordered_rows(session, patient_id)
+    as_of = _as_of_for_patient(obj, rows)
     return compute_state(rows, now=as_of)
 
 @router.post("/patients/{patient_id}/update")
@@ -157,8 +283,16 @@ def history(patient_id: int, session: Session = Depends(get_session)):
             previous_ids = set(previous.state_snapshot.get("source_observation_ids", []))
             added_ids = set(ids) - previous_ids
             new_ids = sorted(added_ids)
-            previous_latest = utc_datetime(previous.latest_observation_at) if previous.latest_observation_at else None
-            late_arrival = bool(previous_latest and any(utc_datetime(observation_lookup[ident].observed_at) < previous_latest for ident in added_ids if ident in observation_lookup))
+            previous_latest_day = previous.state_snapshot.get("latest_observation_date")
+            if previous_latest_day is None and previous.latest_observation_at:
+                previous_latest_day = utc_datetime(previous.latest_observation_at).date().isoformat()
+            added_dates = [observation_date(observation_lookup[ident]) for ident in added_ids if ident in observation_lookup]
+            if previous_latest_day and any(day and day.isoformat() < previous_latest_day for day in added_dates):
+                late_arrival = True
+            elif previous_latest_day and any(day and day.isoformat() == previous_latest_day and observation_precision(observation_lookup[ident]) == "date_only" for ident in added_ids if ident in observation_lookup):
+                late_arrival = None
+            else:
+                late_arrival = False if previous_latest_day else None
             before = previous.state_snapshot.get("measurements", {})
             after = row.state_snapshot.get("measurements", {})
             for kind in MEASUREMENTS:
@@ -176,6 +310,7 @@ def history(patient_id: int, session: Session = Depends(get_session)):
         new_sample = ([{"observation_id": ident, "source_observation_id": observation_lookup[ident].source_observation_id}
                        for ident in new_ids[:20] if ident in observation_lookup] if new_ids is not None else None)
         result.append({"id": row.id, "updated_at": utc_iso(row.created_at), "latest_observation_at": utc_iso(row.latest_observation_at),
+            "latest_observation_date": row.state_snapshot.get("latest_observation_date"),
             "algorithm_version": row.algorithm_version, "reason": row.reason, "source_observation_ids": ids,
             "contributing_observation_count": len(ids), "contributing_observations_sample": contributing_sample,
             "comparison_available": previous is not None, "new_observation_count": len(new_ids) if new_ids is not None else None,
