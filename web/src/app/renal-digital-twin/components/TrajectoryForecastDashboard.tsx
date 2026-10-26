@@ -17,126 +17,130 @@ export function TrajectoryForecastDashboard({
 }) {
   return (
     <div className="space-y-6">
-      {/* Overview Banner */}
-      <div className="rounded-2xl border border-violet-200/80 bg-gradient-to-r from-violet-50/60 via-slate-50/40 to-white p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      {/* Overview Banner with Unified Forecast Summary */}
+      <div className="rounded-2xl border border-violet-200/80 bg-gradient-to-r from-violet-50/50 via-slate-50/30 to-white p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-100/80 pb-3">
           <div>
             <div className="flex items-center gap-2">
               <span className="rounded-full bg-violet-700 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                 Forecast Result
               </span>
-              <span className="text-xs font-semibold text-violet-900">
-                {trajectoryResultForPatient.method || "Mechanistic ODE"}
+              <h3 className="text-base font-bold text-slate-900">
+                Hypothetical Trajectory · {trajectoryResultForPatient.horizon_years} Years
+              </h3>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Index baseline: {formatObservationDate(trajectoryResultForPatient.eligibility.baseline ?? { observed_date: trajectoryResultForPatient.index_date }, true)}
+            </p>
+          </div>
+
+          <span className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800">
+            No treatment intervention
+          </span>
+        </div>
+
+        {/* Consolidated Metric Cards (No repetition!) */}
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          {/* Simulated eGFR */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-indigo-600" />
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide">Simulated eGFR</h4>
+              </div>
+              <span className="font-mono text-xs font-semibold text-slate-500">
+                {trajectoryResultForPatient.analysis.egfr.unit}
               </span>
             </div>
-            <h3 className="mt-1 text-lg font-bold text-slate-900">
-              Hypothetical trajectory · {trajectoryResultForPatient.horizon_years} years
-            </h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {trajectoryResultForPatient.point_count} simulated points · baseline date shown above
-            </p>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-slate-600 font-medium">
-              Index Date: {formatObservationDate(trajectoryResultForPatient.eligibility.baseline ?? { observed_date: trajectoryResultForPatient.index_date }, true)}
-            </span>
-            <span className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-violet-800 font-semibold">
-              Assumes u=0 (No treatment effect)
-            </span>
-          </div>
-        </div>
-
-        {/* Prominent Simulated Forecast Summary */}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 border-t border-violet-100 pt-3">
-          <div className="rounded-xl bg-white p-3 border border-slate-200/70">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Starting eGFR</p>
-            <p className="mt-1 text-lg font-bold font-mono text-slate-900">
-              {trajectoryNumber(trajectoryResultForPatient.analysis.egfr.starting)}{" "}
-              <span className="text-xs font-normal text-slate-500">{trajectoryResultForPatient.analysis.egfr.unit}</span>
-            </p>
-          </div>
-          <div className="rounded-xl bg-white p-3 border border-slate-200/70">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Final eGFR (Yr {trajectoryResultForPatient.horizon_years})</p>
-            <p className="mt-1 text-lg font-bold font-mono text-violet-700">
-              {trajectoryNumber(trajectoryResultForPatient.analysis.egfr.final)}{" "}
-              <span className="text-xs font-normal text-slate-500">{trajectoryResultForPatient.analysis.egfr.unit}</span>
-            </p>
-          </div>
-          <div className="rounded-xl bg-white p-3 border border-slate-200/70">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Starting UACR</p>
-            <p className="mt-1 text-lg font-bold font-mono text-slate-900">
-              {trajectoryNumber(trajectoryResultForPatient.analysis.uacr.starting)}{" "}
-              <span className="text-xs font-normal text-slate-500">{trajectoryResultForPatient.analysis.uacr.unit}</span>
-            </p>
-          </div>
-          <div className="rounded-xl bg-white p-3 border border-slate-200/70">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Final UACR (Yr {trajectoryResultForPatient.horizon_years})</p>
-            <p className="mt-1 text-lg font-bold font-mono text-teal-700">
-              {trajectoryNumber(trajectoryResultForPatient.analysis.uacr.final)}{" "}
-              <span className="text-xs font-normal text-slate-500">{trajectoryResultForPatient.analysis.uacr.unit}</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* eGFR and UACR Detailed Metric Summaries */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {([ ["eGFR", trajectoryResultForPatient.analysis.egfr], ["UACR", trajectoryResultForPatient.analysis.uacr] ] as const).map(([label, metric]) => {
-          const isEgfr = label === "eGFR";
-          return (
-            <article
-              key={label}
-              className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-2xs transition hover:border-slate-300"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="h-3 w-3 rounded-full"
-                    style={{ backgroundColor: isEgfr ? "#6366f1" : "#0d9488" }}
-                  />
-                  <h3 className="font-bold text-slate-900 text-sm">Simulated {label}</h3>
-                </div>
-                <span className="font-mono text-xs font-semibold text-slate-600 bg-slate-50 rounded-lg px-2 py-0.5 border border-slate-200/80">
-                  {metric.unit}
-                </span>
-              </div>
-
-              <div className="mt-3 flex items-baseline justify-between">
-                <p className="text-xs font-medium text-slate-500">Progression Trajectory</p>
-                <p className="font-mono text-sm font-bold text-slate-900">
-                  {trajectoryNumber(metric.starting)} → {trajectoryNumber(metric.final)} {metric.unit}
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Baseline → Yr {trajectoryResultForPatient.horizon_years}
+                </p>
+                <p className="mt-1 font-mono text-sm font-bold text-slate-900">
+                  {trajectoryNumber(trajectoryResultForPatient.analysis.egfr.starting)} →{" "}
+                  <span className="text-violet-700 font-extrabold">
+                    {trajectoryNumber(trajectoryResultForPatient.analysis.egfr.final)}
+                  </span>
                 </p>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-xl bg-slate-50/80 p-2.5 border border-slate-100">
-                  <p className="text-[10px] uppercase font-semibold text-slate-500">Absolute Change</p>
-                  <p className="mt-1 font-mono text-sm font-bold text-slate-800">
-                    {metric.absolute_change == null ? "Unavailable" : `${metric.absolute_change >= 0 ? "+" : ""}${trajectoryNumber(metric.absolute_change)} ${metric.unit}`}
-                    {metric.percent_change != null && (
-                      <span className="ml-1 text-[11px] font-medium text-slate-500">
-                        ({metric.percent_change >= 0 ? "+" : ""}{trajectoryNumber(metric.percent_change, 1)}%)
-                      </span>
-                    )}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-slate-50/80 p-2.5 border border-slate-100">
-                  <p className="text-[10px] uppercase font-semibold text-slate-500">Avg Annualized</p>
-                  <p className="mt-1 font-mono text-sm font-bold text-slate-800">
-                    {metric.average_annualized_change == null ? "Unavailable" : `${metric.average_annualized_change >= 0 ? "+" : ""}${trajectoryNumber(metric.average_annualized_change)} ${metric.unit}/year`}
-                  </p>
-                </div>
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Change</p>
+                <p className="mt-1 font-mono text-sm font-bold text-slate-900">
+                  {trajectoryResultForPatient.analysis.egfr.absolute_change == null
+                    ? "—"
+                    : `${trajectoryResultForPatient.analysis.egfr.absolute_change >= 0 ? "+" : ""}${trajectoryNumber(trajectoryResultForPatient.analysis.egfr.absolute_change)}`}
+                  {trajectoryResultForPatient.analysis.egfr.percent_change != null && (
+                    <span className="ml-1 text-[11px] font-normal text-slate-500">
+                      ({trajectoryResultForPatient.analysis.egfr.percent_change >= 0 ? "+" : ""}{trajectoryNumber(trajectoryResultForPatient.analysis.egfr.percent_change, 1)}%)
+                    </span>
+                  )}
+                </p>
               </div>
 
-              <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-100 pt-2.5">
-                <span>{metric.valid_points} points over {trajectoryNumber(metric.elapsed_years)} years</span>
-                <span className="font-mono font-medium text-slate-600">dt = {(Number(trajectoryResultForPatient.horizon_years) / Math.max(1, metric.valid_points - 1)).toFixed(3)}y</span>
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Annual Rate</p>
+                <p className="mt-1 font-mono text-sm font-bold text-slate-900">
+                  {trajectoryResultForPatient.analysis.egfr.average_annualized_change == null
+                    ? "—"
+                    : `${trajectoryResultForPatient.analysis.egfr.average_annualized_change >= 0 ? "+" : ""}${trajectoryNumber(trajectoryResultForPatient.analysis.egfr.average_annualized_change)}/yr`}
+                </p>
               </div>
-            </article>
-          );
-        })}
+            </div>
+          </div>
+
+          {/* Simulated UACR */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-teal-600" />
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wide">Simulated UACR</h4>
+              </div>
+              <span className="font-mono text-xs font-semibold text-slate-500">
+                {trajectoryResultForPatient.analysis.uacr.unit}
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Baseline → Yr {trajectoryResultForPatient.horizon_years}
+                </p>
+                <p className="mt-1 font-mono text-sm font-bold text-slate-900">
+                  {trajectoryNumber(trajectoryResultForPatient.analysis.uacr.starting)} →{" "}
+                  <span className="text-teal-700 font-extrabold">
+                    {trajectoryNumber(trajectoryResultForPatient.analysis.uacr.final)}
+                  </span>
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Change</p>
+                <p className="mt-1 font-mono text-sm font-bold text-slate-900">
+                  {trajectoryResultForPatient.analysis.uacr.absolute_change == null
+                    ? "—"
+                    : `${trajectoryResultForPatient.analysis.uacr.absolute_change >= 0 ? "+" : ""}${trajectoryNumber(trajectoryResultForPatient.analysis.uacr.absolute_change)}`}
+                  {trajectoryResultForPatient.analysis.uacr.percent_change != null && (
+                    <span className="ml-1 text-[11px] font-normal text-slate-500">
+                      ({trajectoryResultForPatient.analysis.uacr.percent_change >= 0 ? "+" : ""}{trajectoryNumber(trajectoryResultForPatient.analysis.uacr.percent_change, 1)}%)
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Annual Rate</p>
+                <p className="mt-1 font-mono text-sm font-bold text-slate-900">
+                  {trajectoryResultForPatient.analysis.uacr.average_annualized_change == null
+                    ? "—"
+                    : `${trajectoryResultForPatient.analysis.uacr.average_annualized_change >= 0 ? "+" : ""}${trajectoryNumber(trajectoryResultForPatient.analysis.uacr.average_annualized_change)}/yr`}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Visualizations and Categorization Grid */}

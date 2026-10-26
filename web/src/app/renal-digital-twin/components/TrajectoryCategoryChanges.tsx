@@ -4,28 +4,30 @@ import { Info, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { TrajectorySimulationResult } from "../types";
 
-type CellData = { risk: 0 | 1 | 2 | 3; action: string; freq: number };
+type CellData = { risk: 0 | 1 | 2 | 3 | 4; action: string; freq: number };
 
 const MATRIX: Record<string, [CellData, CellData, CellData]> = {
   G1:  [{ risk: 0, action: "Screen",        freq: 1 }, { risk: 1, action: "Treat",        freq: 1 }, { risk: 2, action: "Treat & Refer", freq: 3 }],
   G2:  [{ risk: 0, action: "Screen",        freq: 1 }, { risk: 1, action: "Treat",        freq: 1 }, { risk: 2, action: "Treat & Refer", freq: 3 }],
   G3a: [{ risk: 1, action: "Treat",         freq: 1 }, { risk: 2, action: "Treat",        freq: 2 }, { risk: 3, action: "Treat & Refer", freq: 3 }],
   G3b: [{ risk: 2, action: "Treat",         freq: 2 }, { risk: 3, action: "Treat & Refer",freq: 3 }, { risk: 3, action: "Treat & Refer", freq: 3 }],
-  G4:  [{ risk: 3, action: "Treat & Refer", freq: 3 }, { risk: 3, action: "Treat & Refer",freq: 3 }, { risk: 3, action: "Treat & Refer", freq: 4 }],
-  G5:  [{ risk: 3, action: "Treat & Refer", freq: 4 }, { risk: 3, action: "Treat & Refer",freq: 4 }, { risk: 3, action: "Treat & Refer", freq: 4 }],
+  G4:  [{ risk: 3, action: "Treat & Refer", freq: 3 }, { risk: 3, action: "Treat & Refer",freq: 3 }, { risk: 4, action: "Treat & Refer", freq: 4 }],
+  G5:  [{ risk: 4, action: "Treat & Refer", freq: 4 }, { risk: 4, action: "Treat & Refer",freq: 4 }, { risk: 4, action: "Treat & Refer", freq: 4 }],
 };
 
 const RISK_BG: Record<number, string> = {
   0: "bg-emerald-500 text-white",
   1: "bg-amber-300 text-amber-950",
   2: "bg-amber-500 text-white",
-  3: "bg-rose-600 text-white",
+  3: "bg-[#f05a68] text-white",
+  4: "bg-rose-600 text-white",
 };
 const RISK_SWATCH: Record<number, string> = {
   0: "bg-emerald-500",
   1: "bg-amber-300",
   2: "bg-amber-500",
-  3: "bg-rose-600",
+  3: "bg-[#f05a68]",
+  4: "bg-rose-600",
 };
 
 const GFR_ROWS = [
@@ -261,6 +263,7 @@ export function TrajectoryCategoryChanges({
                     { risk: 1, label: "Moderate" },
                     { risk: 2, label: "High" },
                     { risk: 3, label: "Very high" },
+                    { risk: 4, label: "Very high (4+ checks)" },
                   ].map(({ risk, label }) => (
                     <div key={risk} className="flex items-center gap-1.5">
                       <span className={`h-2.5 w-2.5 shrink-0 rounded-xs ${RISK_SWATCH[risk]}`} />

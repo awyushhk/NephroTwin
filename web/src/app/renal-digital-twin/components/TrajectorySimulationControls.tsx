@@ -56,9 +56,6 @@ export function TrajectorySimulationControls({
             Configure the index baseline observation and simulation forecasting horizon.
           </p>
         </div>
-        <span className="text-[11px] font-medium text-violet-800 bg-violet-100/70 rounded-full px-2.5 py-1">
-          Horizon: {trajectoryYears} {Number(trajectoryYears) === 1 ? "year" : "years"}
-        </span>
       </div>
 
       <form onSubmit={(event) => void runTrajectorySimulation(event)} className="space-y-4">
@@ -93,36 +90,26 @@ export function TrajectorySimulationControls({
             )}
           </div>
 
-          {/* Horizon Picker */}
+          {/* Single Horizon Picker */}
           <div className="lg:col-span-1">
-            <label htmlFor="trajectory-horizon" className="block text-xs font-bold text-slate-700">
+            <label className="block text-xs font-bold text-slate-700">
               Simulation horizon
             </label>
-            <select
-              id="trajectory-horizon"
-              className={inputClassName}
-              value={trajectoryYears}
-              onChange={(event) => setTrajectoryYears(event.target.value)}
-            >
-              {[1, 5, 10, 15].map((years) => (
-                <option key={years} value={years}>
-                  {years} {years === 1 ? "year" : "years"}
-                </option>
-              ))}
-            </select>
-            <div className="mt-1.5 flex items-center gap-1.5">
+            <div role="radiogroup" aria-label="Simulation horizon" className="mt-1.5 flex h-[42px] items-center gap-1 rounded-xl border border-slate-300 bg-white p-1">
               {[1, 5, 10, 15].map((years) => (
                 <button
                   key={years}
                   type="button"
+                  role="radio"
+                  aria-checked={Number(trajectoryYears) === years}
                   onClick={() => setTrajectoryYears(String(years))}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
+                  className={`flex-1 h-full rounded-lg text-xs font-semibold transition ${
                     Number(trajectoryYears) === years
-                      ? "border border-violet-600 bg-violet-600 text-white font-semibold shadow-2xs"
-                      : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      ? "bg-violet-700 text-white shadow-2xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900"
                   }`}
                 >
-                  {years}y
+                  {years} {years === 1 ? "yr" : "yrs"}
                 </button>
               ))}
             </div>

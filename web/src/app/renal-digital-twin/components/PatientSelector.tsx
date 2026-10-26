@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent } from "react";
-import { ArrowRight, Database, LoaderCircle, Sparkles } from "lucide-react";
+import { FormEvent, useState } from "react";
+import { ArrowRight, ChevronDown, Database, LoaderCircle, Search, Sparkles } from "lucide-react";
 import type {
   ExamplePatient,
   MeasurementType,
@@ -68,6 +68,25 @@ export function PatientSelector({
   primaryButtonClassName: string;
   panelClassName: string;
 }) {
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientSearchOpen, setPatientSearchOpen] = useState(false);
+  const selectedPatient = patients.find((patient) => patient.id === patientId);
+  const normalizedSearch = patientSearch.trim().toLocaleLowerCase();
+  const matchingPatients = normalizedSearch
+    ? patients.filter((patient) => {
+        const searchableId = `${patient.patient_code ?? ""} ${patient.id}`.toLocaleLowerCase();
+        return searchableId.includes(normalizedSearch);
+      })
+    : patients;
+
+  function selectPatient(id: number) {
+    setPatientId(id);
+    setTimelinePage(0);
+    setNotice("");
+    setPatientSearch("");
+    setPatientSearchOpen(false);
+  }
+
   return (
     <>
       <div
@@ -117,42 +136,85 @@ export function PatientSelector({
       >
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)] md:items-end">
           <div>
-            <label
-              id="profile-heading"
-              htmlFor="patient-select"
-              className="text-sm font-semibold text-slate-900"
-            >
+            <label id="profile-heading" className="text-sm font-semibold text-slate-900">
               Patient profile
             </label>
             <p className="mt-1 text-xs text-slate-500">
               Select a pseudonymous cohort profile to inspect its recorded
               history.
             </p>
-            <select
-              id="patient-select"
-              className={`${inputClassName} max-w-2xl`}
-              value={patientId}
-              disabled={loadingPatients || patients.length === 0}
-              onChange={(event) => {
-                setPatientId(
-                  event.target.value ? Number(event.target.value) : ""
-                );
-                setTimelinePage(0);
-                setNotice("");
+            <div
+              className="relative max-w-2xl"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setPatientSearchOpen(false);
+                }
               }}
             >
-              <option value="">
-                {loadingPatients
-                  ? "Loading patient profiles…"
-                  : "Choose a patient"}
-              </option>
-              {patients.map((patient) => (
-                <option key={patient.id} value={patient.id}>
-                  {patient.patient_code ?? `Patient ${patient.id}`} ·{" "}
-                  {patient.observation_count.toLocaleString()} observations
-                </option>
-              ))}
-            </select>
+              <button
+                id="patient-picker"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={patientSearchOpen}
+                aria-controls="patient-picker-options"
+                className={`${inputClassName} flex max-w-2xl items-center justify-between gap-3 text-left`}
+                disabled={loadingPatients || patients.length === 0}
+                onClick={() => {
+                  setPatientSearch("");
+                  setPatientSearchOpen((open) => !open);
+                }}
+              >
+                <span className={selectedPatient ? "truncate text-slate-800" : "text-slate-500"}>
+                  {selectedPatient
+                    ? `${selectedPatient.patient_code ?? `Patient ${selectedPatient.id}`} · ${selectedPatient.observation_count.toLocaleString()} observations`
+                    : loadingPatients ? "Loading patient profiles…" : "Choose a patient"}
+                </span>
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${patientSearchOpen ? "rotate-180" : ""}`} />
+              </button>
+              {patientSearchOpen && (
+                <div
+                  id="patient-picker-options"
+                  className="mt-2 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"
+                >
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      autoFocus
+                      type="search"
+                      aria-label="Search patient ID"
+                      placeholder="Search MIMIC31 ID or numeric ID"
+                      value={patientSearch}
+                      onChange={(event) => setPatientSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") setPatientSearchOpen(false);
+                        if (event.key === "Enter" && matchingPatients[0]) {
+                          event.preventDefault();
+                          selectPatient(matchingPatients[0].id);
+                        }
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 outline-none focus:border-teal-600 focus:ring-4 focus:ring-teal-100"
+                    />
+                  </div>
+                  <div role="listbox" aria-label="Patient profiles" className="mt-2 max-h-52 overflow-y-auto">
+                    {matchingPatients.length ? matchingPatients.map((patient) => (
+                      <button
+                        key={patient.id}
+                        type="button"
+                        role="option"
+                        aria-selected={patient.id === patientId}
+                        onClick={() => selectPatient(patient.id)}
+                        className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-teal-50 focus:bg-teal-50 focus:outline-none ${patient.id === patientId ? "bg-teal-50 text-teal-900" : "text-slate-800"}`}
+                      >
+                        <span>{patient.patient_code ?? `Patient ${patient.id}`}</span>
+                        <span className="shrink-0 text-xs text-slate-500">{patient.observation_count.toLocaleString()} observations</span>
+                      </button>
+                    )) : (
+                      <p className="px-3 py-2 text-sm text-slate-500">No matching patient profile.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <form
             onSubmit={(event) => void createPatient(event)}

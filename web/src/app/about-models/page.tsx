@@ -13,7 +13,7 @@ import {
 
 export default function AboutModelsPage() {
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="w-full space-y-8">
       {/* Page Title */}
       <div>
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-teal-700">

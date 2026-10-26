@@ -423,7 +423,7 @@ export default function RenalDigitalTwinPage() {
           method: "POST",
           body: JSON.stringify({
             baseline_observation_id: Number(scenarioBase),
-            horizon_years: Number(trajectoryYears),
+            years: Number(trajectoryYears),
           }),
         },
       );
