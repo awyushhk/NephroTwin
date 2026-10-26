@@ -7,6 +7,7 @@ import type {
   MeasurementType,
   Patient,
 } from "../types";
+import { OBSERVATION_INPUT_UNITS } from "../types";
 import type { MeasurementSpec } from "./TrendChart";
 
 export function PatientSelector({
@@ -275,7 +276,7 @@ export function PatientSelector({
               htmlFor="measurement-value"
               className="text-xs font-semibold text-slate-700"
             >
-              Value · {specs[kind].unit}
+              Value · {OBSERVATION_INPUT_UNITS[kind]}
             </label>
             <input
               id="measurement-value"

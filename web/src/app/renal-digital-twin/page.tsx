@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ApiError, renalTwinRequest } from "@/lib/api";
+import { OBSERVATION_INPUT_UNITS } from "./types";
 import type {
   ChartObservation,
   ExamplePatient,
@@ -444,7 +445,7 @@ export default function RenalDigitalTwinPage() {
     setNotice("");
     try {
       const state = await renalTwinRequest<TwinState>(
-        `/patients/${patientId}/state`,
+        `/patients/${patientId}/update`,
         { method: "POST" },
       );
       setTwin(state);
@@ -470,14 +471,14 @@ export default function RenalDigitalTwinPage() {
     setNotice("");
     try {
       const numeric = Number(value);
-      const row = await renalTwinRequest<Observation>(
+      const response = await renalTwinRequest<{ observation: Observation; state: TwinState }>(
         `/patients/${patientId}/observations`,
         {
           method: "POST",
           body: JSON.stringify({
             measurement_type: kind,
             value: numeric,
-            unit: specs[kind].unit,
+            unit: OBSERVATION_INPUT_UNITS[kind],
             observed_at: new Date(observedAt).toISOString(),
             source: source.trim() || undefined,
           }),
@@ -486,10 +487,9 @@ export default function RenalDigitalTwinPage() {
       setValue("");
       setObservedAt("");
       setSource("");
-      setNotice(
-        `Observation #${row.id} recorded. Recomputing current state…`,
-      );
-      await Promise.all([refreshPatient(), recomputeState()]);
+      setTwin(response.state);
+      setNotice(`Observation #${response.observation.id} recorded.`);
+      await Promise.all([refreshPatient(), refreshPatients()]);
     } catch (err) {
       setError(
         err instanceof ApiError

@@ -30,6 +30,20 @@ export type MeasurementType =
   | "diastolic_bp"
   | "hba1c";
 
+export const OBSERVATION_INPUT_UNITS: Record<MeasurementType, string> = {
+  egfr: "mL/min/1.73m2",
+  creatinine: "mg/dL",
+  acr: "mg/g",
+  bun: "mg/dL",
+  potassium: "mmol/L",
+  bicarbonate: "mmol/L",
+  urine_albumin: "mg/dL",
+  urine_creatinine: "mg/dL",
+  systolic_bp: "mmHg",
+  diastolic_bp: "mmHg",
+  hba1c: "%",
+};
+
 export type MeasurementFilter = MeasurementType | "all";
 
 export type ObservationDateFields = {
