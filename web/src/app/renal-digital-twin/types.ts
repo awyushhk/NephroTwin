@@ -147,10 +147,29 @@ export type TrajectorySimulationResult = {
   trajectory: { year: number; egfr: number; uacr: number }[];
   analysis: TrajectoryAnalysis;
   time_to_egfr_below_15_years: number | null;
+  scenarios: {
+    no_treatment: TrajectoryScenarioResult;
+    hypothetical_treatment: TrajectoryScenarioResult;
+  };
+  comparison: {
+    egfr_endpoint_difference: number;
+    egfr_endpoint_difference_unit: string;
+    uacr_endpoint_difference: number;
+    uacr_endpoint_difference_unit: string;
+    uacr_endpoint_percent_difference: number | null;
+  };
   assumptions: { u: number; parameter_set: string; points: number; source_model: string };
   eligibility: TrajectoryEligibility;
   warnings: string[];
   limitations: string[];
+};
+
+export type TrajectoryScenarioResult = {
+  label: string;
+  u: number;
+  trajectory: { year: number; egfr: number; uacr: number }[];
+  analysis: TrajectoryAnalysis;
+  time_to_egfr_below_15_years: number | null;
 };
 
 export type TrajectoryMilestone = {

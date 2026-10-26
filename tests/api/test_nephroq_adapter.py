@@ -45,6 +45,17 @@ def test_nephroq_all_fresh_inputs_from_different_dates_are_eligible_and_run():
     assert result["point_count"] == 400
     assert result["trajectory"][0]["egfr"] == pytest.approx(float(expected[1][0]))
     assert result["trajectory"][-1]["uacr"] == pytest.approx(float(expected[2][-1]))
+    assert result["scenarios"]["no_treatment"]["trajectory"] == result["trajectory"]
+    assert result["scenarios"]["no_treatment"]["u"] == 0.0
+    assert result["scenarios"]["hypothetical_treatment"]["u"] == 1.0
+    assert result["scenarios"]["hypothetical_treatment"]["trajectory"][0]["year"] == result["trajectory"][0]["year"]
+    assert result["scenarios"]["hypothetical_treatment"]["trajectory"][-1]["year"] == result["trajectory"][-1]["year"]
+    assert result["comparison"]["egfr_endpoint_difference"] == pytest.approx(
+        result["scenarios"]["hypothetical_treatment"]["analysis"]["egfr"]["final"] - result["analysis"]["egfr"]["final"]
+    )
+    assert result["comparison"]["uacr_endpoint_difference"] == pytest.approx(
+        result["scenarios"]["hypothetical_treatment"]["analysis"]["uacr"]["final"] - result["analysis"]["uacr"]["final"]
+    )
     assert result["baseline_inputs"]["acr"]["source_observation_id"] == "source-2"
     assert result["baseline_inputs"]["acr"]["stale"] is False
     assert result["baseline_inputs"]["systolic_bp"]["stale"] is False
@@ -55,8 +66,66 @@ def test_nephroq_all_fresh_inputs_from_different_dates_are_eligible_and_run():
     assert result["analysis"]["uacr"]["final"] == pytest.approx(result["trajectory"][-1]["uacr"])
     assert result["analysis"]["categories"]["starting"] is not None
     assert result["assumptions"]["u"] == 0.0
+    assert result["assumptions"]["treatment_u"] == 1.0
+    assert result["assumptions"]["acute_egfr_dip_included"] is False
     assert result["time_to_egfr_below_15_years"] is None
     assert any("different dates" in warning for warning in result["warnings"])
+
+
+def test_treatment_scenario_uses_same_inputs_horizon_and_time_grid(monkeypatch):
+    import numpy as np
+    import renal_trajectory_module
+
+    calls = []
+
+    def fake_simulator(*, egfr0, a1c, uacr0, sbp, u, p, years, n):
+        calls.append({"inputs": (egfr0, a1c, uacr0, sbp), "u": u, "p": p, "years": years, "n": n})
+        times = np.linspace(0, years, n)
+        egfr = np.full(n, egfr0 + (u * 2))
+        uacr = np.full(n, uacr0 - (u * 3))
+        return times, egfr, uacr, np.inf
+
+    monkeypatch.setattr(renal_trajectory_module, "simulate_trajectory_v2", fake_simulator)
+    result = simulate_nephroq(_complete_rows(), patient_id=77, years=5)
+
+    assert [call["u"] for call in calls] == [0.0, 1.0]
+    assert all(call["inputs"] == (58.0, 7.4, 13.0, 130.0) for call in calls)
+    assert all(call["years"] == 5.0 and call["n"] == 400 and call["p"] is None for call in calls)
+    assert result["comparison"]["egfr_endpoint_difference"] == pytest.approx(2.0)
+    assert result["comparison"]["uacr_endpoint_difference"] == pytest.approx(-3.0)
+    assert result["comparison"]["uacr_endpoint_percent_difference"] == pytest.approx(-3 / 13 * 100)
+
+
+def test_invalid_treatment_output_fails_instead_of_returning_a_partial_comparison(monkeypatch):
+    import numpy as np
+    import renal_trajectory_module
+
+    def fake_simulator(*, egfr0, a1c, uacr0, sbp, u, p, years, n):
+        times = np.linspace(0, years, n)
+        egfr = np.full(n, egfr0 if u == 0 else np.nan)
+        return times, egfr, np.full(n, uacr0), np.inf
+
+    monkeypatch.setattr(renal_trajectory_module, "simulate_trajectory_v2", fake_simulator)
+    with pytest.raises(RuntimeError, match="invalid or time-misaligned"):
+        simulate_nephroq(_complete_rows(), patient_id=77, years=1)
+
+
+def test_threshold_analysis_is_computed_separately_for_each_scenario(monkeypatch):
+    import numpy as np
+    import renal_trajectory_module
+
+    def fake_simulator(*, egfr0, a1c, uacr0, sbp, u, p, years, n):
+        times = np.linspace(0, years, n)
+        endpoint = 10 if u == 0 else 40
+        egfr = np.linspace(70, endpoint, n)
+        uacr = np.linspace(uacr0, uacr0 + 10, n) * (0.8 if u else 1.0)
+        return times, egfr, uacr, np.inf
+
+    monkeypatch.setattr(renal_trajectory_module, "simulate_trajectory_v2", fake_simulator)
+    result = simulate_nephroq(_complete_rows(), patient_id=77, years=1)
+
+    assert result["scenarios"]["no_treatment"]["analysis"]["egfr"]["thresholds"]["15"]["status"] == "crossed"
+    assert result["scenarios"]["hypothetical_treatment"]["analysis"]["egfr"]["thresholds"]["15"]["status"] == "not_crossed"
 
 
 def test_nephroq_missing_required_input_is_reported_and_blocks_run():

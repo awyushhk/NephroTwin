@@ -50,8 +50,14 @@ export function TrajectoryCategoryChanges({
 }: {
   trajectoryResult: TrajectorySimulationResult;
 }) {
-  const { analysis, horizon_years } = trajectoryResult;
-  const { categories } = analysis;
+  const { horizon_years } = trajectoryResult;
+  const noTreatmentCategories = trajectoryResult.scenarios.no_treatment.analysis.categories;
+  const treatmentCategories = trajectoryResult.scenarios.hypothetical_treatment.analysis.categories;
+  const categories = noTreatmentCategories;
+  const transitions = [
+    ...noTreatmentCategories.transitions.map((item) => ({ ...item, scenario: "No treatment" })),
+    ...treatmentCategories.transitions.map((item) => ({ ...item, scenario: "SGLT2i-informed scenario" })),
+  ].sort((left, right) => left.year - right.year);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +85,7 @@ export function TrajectoryCategoryChanges({
       <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <div>
           <h3 className="text-sm font-bold text-slate-900 tracking-tight">Simulated category changes</h3>
-          <p className="text-[11px] text-slate-500">KDIGO classification progression</p>
+          <p className="text-[11px] text-slate-500">Categories applied to simulated values</p>
         </div>
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
           KDIGO 2024
@@ -87,33 +93,43 @@ export function TrajectoryCategoryChanges({
       </div>
       <p className="mt-2 text-xs text-slate-500">Not a diagnosis or confirmed disease progression.</p>
 
-      <div className="mt-3.5 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Start (Year 0)</p>
-          <p className="mt-1 font-mono text-sm font-bold text-slate-900">
-            {categories.starting ? `${categories.starting.gfr} · ${categories.starting.albuminuria}` : "Unavailable"}
-          </p>
-        </div>
-        <div className="rounded-xl border border-violet-200/80 bg-violet-50/40 p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-violet-800">End (Year {horizon_years})</p>
-          <p className="mt-1 font-mono text-sm font-bold text-violet-950">
-            {categories.final ? `${categories.final.gfr} · ${categories.final.albuminuria}` : "Unavailable"}
-          </p>
-        </div>
+      <div className="mt-3.5 grid gap-2 text-xs sm:grid-cols-2">
+        {[
+          { label: "No treatment", categories: noTreatmentCategories, style: "border-rose-200/80 bg-rose-50/40", heading: "text-rose-800", value: "text-slate-900" },
+          { label: "SGLT2i-informed scenario", categories: treatmentCategories, style: "border-emerald-200/80 bg-emerald-50/40", heading: "text-emerald-800", value: "text-slate-900" },
+        ].map((scenario) => (
+          <div key={scenario.label} className={`rounded-xl border p-3 ${scenario.style}`}>
+            <h4 className={`text-[10px] font-bold uppercase tracking-wider ${scenario.heading}`}>{scenario.label}</h4>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Start</p>
+                <p className={`mt-1 font-mono text-sm font-bold ${scenario.value}`}>
+                  {scenario.categories.starting ? `${scenario.categories.starting.gfr} · ${scenario.categories.starting.albuminuria}` : "Unavailable"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">End Year {horizon_years}</p>
+                <p className={`mt-1 font-mono text-sm font-bold ${scenario.value}`}>
+                  {scenario.categories.final ? `${scenario.categories.final.gfr} · ${scenario.categories.final.albuminuria}` : "Unavailable"}
+                </p>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {categories.transitions.length ? (
+      {transitions.length ? (
         <div className="mt-3.5 border-t border-slate-100 pt-3">
           <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-2">
-            Transition Milestones ({categories.transitions.length})
+            Transition Milestones ({transitions.length})
           </p>
           <ol className="max-h-48 space-y-2 overflow-y-auto pr-1 text-xs">
-            {categories.transitions.map((item, index) => (
+            {transitions.map((item, index) => (
               <li
                 key={`${item.year}-${index}`}
                 className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/70 bg-slate-50/60 p-2"
               >
-                <span className="font-mono font-bold text-violet-900">Year {item.year.toFixed(2)}</span>
+                <span className="font-mono font-bold text-violet-900">Yr {item.year.toFixed(2)} · {item.scenario}</span>
                 <span className="font-medium text-slate-800">
                   {item.gfr_category} · {item.albuminuria_category}
                 </span>

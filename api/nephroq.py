@@ -25,7 +25,8 @@ LIMITATIONS = [
     "Research simulation only; not a validated patient-specific clinical forecast or diagnosis.",
     "Inputs may be from different dates and must not be assumed simultaneous.",
     "The bundled trial-anchored parameter defaults are used; no patient-specific fitting or training is performed.",
-    "The default model setting u=0 is used; no treatment effect is represented.",
+    "The treatment comparison is a model counterfactual; it does not represent an individual's response to a prescribed therapy.",
+    "The trajectory model represents chronic effects and does not include the separate acute eGFR dip event helper.",
 ]
 
 
@@ -260,33 +261,83 @@ def simulate_nephroq(rows, patient_id: int, years: float, baseline_observation_i
             egfr0=values["egfr0"], a1c=values["a1c"], uacr0=values["uacr0"], sbp=values["sbp"],
             u=0.0, p=None, years=float(years), n=400,
         )
-        trajectory = [
+        no_treatment = [
             {"year": float(t), "egfr": float(g), "uacr": float(a)}
             for t, g, a in zip(times, egfr_values, uacr_values, strict=True)
         ]
+        treated_times, treated_egfr, treated_uacr, treated_threshold_time = simulate_trajectory_v2(
+            egfr0=values["egfr0"], a1c=values["a1c"], uacr0=values["uacr0"], sbp=values["sbp"],
+            u=1.0, p=None, years=float(years), n=400,
+        )
+        treatment = [
+            {"year": float(t), "egfr": float(g), "uacr": float(a)}
+            for t, g, a in zip(treated_times, treated_egfr, treated_uacr, strict=True)
+        ]
     except Exception as exc:
         raise RuntimeError(f"Trajectory simulation failed: {exc}") from exc
-    if len(trajectory) != 400 or any(
-        not all(isfinite(point[key]) for key in ("year", "egfr", "uacr")) for point in trajectory
-    ):
-        raise RuntimeError("The trajectory simulator returned an incomplete or non-finite result.")
+    if len(no_treatment) != 400 or len(treatment) != 400 or any(
+        not all(isfinite(point[key]) for key in ("year", "egfr", "uacr"))
+        for point in no_treatment + treatment
+    ) or any(a["year"] != b["year"] for a, b in zip(no_treatment, treatment, strict=True)):
+        raise RuntimeError("The simulator returned invalid or time-misaligned scenario outputs.")
 
     threshold_years = float(threshold_time)
+    treatment_threshold_years = float(treated_threshold_time)
+    no_treatment_analysis = summarize_trajectory(no_treatment)
+    treatment_analysis = summarize_trajectory(treatment)
+    egfr_no_treatment_end = no_treatment_analysis["egfr"]["final"]
+    egfr_treatment_end = treatment_analysis["egfr"]["final"]
+    uacr_no_treatment_end = no_treatment_analysis["uacr"]["final"]
+    uacr_treatment_end = treatment_analysis["uacr"]["final"]
+    if None in (egfr_no_treatment_end, egfr_treatment_end, uacr_no_treatment_end, uacr_treatment_end):
+        raise RuntimeError("The simulator returned no valid endpoint values for the scenario comparison.")
+    egfr_treatment_difference = egfr_treatment_end - egfr_no_treatment_end
+    uacr_treatment_difference = uacr_treatment_end - uacr_no_treatment_end
     return {
-        "method": "nephroq.simulate_trajectory_v2",
+        "method": "renal_trajectory_module.simulate_trajectory_v2",
         "patient_id": patient_id,
         "horizon_years": float(years),
-        "point_count": len(trajectory),
+        "point_count": len(no_treatment),
         "index_date": eligibility["index_date"],
         "baseline_inputs": inputs,
-        "trajectory": trajectory,
-        "analysis": summarize_trajectory(trajectory),
+        # Keep legacy fields mapped to the original untreated result.
+        "trajectory": no_treatment,
+        "analysis": no_treatment_analysis,
         "time_to_egfr_below_15_years": threshold_years if isfinite(threshold_years) else None,
+        "scenarios": {
+            "no_treatment": {
+                "label": "No treatment",
+                "u": 0.0,
+                "trajectory": no_treatment,
+                "analysis": no_treatment_analysis,
+                "time_to_egfr_below_15_years": threshold_years if isfinite(threshold_years) else None,
+            },
+            "hypothetical_treatment": {
+                "label": "Hypothetical renoprotective treatment",
+                "u": 1.0,
+                "trajectory": treatment,
+                "analysis": treatment_analysis,
+                "time_to_egfr_below_15_years": treatment_threshold_years if isfinite(treatment_threshold_years) else None,
+            },
+        },
+        "comparison": {
+            "egfr_endpoint_difference": egfr_treatment_difference,
+            "egfr_endpoint_difference_unit": "mL/min/1.73m2",
+            "uacr_endpoint_difference": uacr_treatment_difference,
+            "uacr_endpoint_difference_unit": "mg/g",
+            "uacr_endpoint_percent_difference": (
+                uacr_treatment_difference / no_treatment_analysis["uacr"]["final"] * 100.0
+                if uacr_no_treatment_end != 0 else None
+            ),
+        },
         "assumptions": {
             "u": 0.0,
             "parameter_set": "bundled TRIAL_CALIBRATION_V2 defaults (p=None)",
             "points": 400,
-            "source_model": "NephroQ simulate_trajectory_v2; equations unchanged",
+            "source_model": "Integrated renal trajectory module; equations unchanged",
+            "treatment_u": 1.0,
+            "treatment_effects": "Bundled eff_hf, eff_met, and eff_alb defaults; the UACR factor applies from the first simulation point.",
+            "acute_egfr_dip_included": False,
         },
         "eligibility": eligibility,
         "warnings": list(dict.fromkeys(eligibility["warnings"])),

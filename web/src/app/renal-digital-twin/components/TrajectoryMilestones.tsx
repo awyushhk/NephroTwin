@@ -4,78 +4,38 @@ import type { TrajectoryMilestone, TrajectorySimulationResult } from "../types";
 
 export function milestoneDescription(milestone: TrajectoryMilestone | undefined) {
   if (!milestone) return "Unavailable";
-  if (milestone.status === "crossed") {
-    return milestone.time_years != null ? `Reached at year ${milestone.time_years.toFixed(2)}` : "Reached";
-  }
+  if (milestone.status === "crossed") return milestone.time_years != null ? `Year ${milestone.time_years.toFixed(2)}` : "Crossed";
   if (milestone.status === "below_at_baseline") return "Below at baseline";
-  if (milestone.status === "at_threshold_at_baseline") return "At threshold at baseline";
+  if (milestone.status === "at_threshold_at_baseline") return "At baseline";
+  if (milestone.status === "unavailable") return "Unavailable";
   return "Not crossed in horizon";
 }
 
-export function TrajectoryMilestones({
-  trajectoryResult,
-}: {
-  trajectoryResult: TrajectorySimulationResult;
-}) {
-  const { analysis } = trajectoryResult;
-
+export function TrajectoryMilestones({ trajectoryResult }: { trajectoryResult: TrajectorySimulationResult }) {
+  const scenarios = [trajectoryResult.scenarios.no_treatment, trajectoryResult.scenarios.hypothetical_treatment];
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs sm:p-5">
-      <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+      <div className="border-b border-slate-100 pb-2.5">
         <h3 className="text-sm font-bold text-slate-900 tracking-tight">eGFR milestones</h3>
-        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-          Interpolated Thresholds
-        </span>
+        <p className="text-[11px] text-slate-500">Calculated independently from each returned trajectory</p>
       </div>
-
-      <ul className="mt-3 space-y-2.5 text-xs">
-        {["60", "45", "30", "15"].map((threshold) => {
-          const milestone = analysis.egfr.thresholds?.[threshold];
-          const isCrossed = milestone?.status === "crossed";
-          return (
-            <li
-              key={threshold}
-              className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/50 p-2.5 transition hover:border-slate-300"
-            >
-              <div>
-                <span className="font-bold text-slate-900">eGFR {threshold}</span>
-                <span className="ml-1 text-[11px] text-slate-500">mL/min/1.73m²</span>
-              </div>
-              <span
-                className={`rounded-lg px-2.5 py-1 font-mono text-[11px] font-semibold text-right ${
-                  isCrossed
-                    ? "bg-violet-100 text-violet-800 border border-violet-200"
-                    : milestone?.status === "below_at_baseline" || milestone?.status === "at_threshold_at_baseline"
-                    ? "bg-amber-100 text-amber-800 border border-amber-200"
-                    : "bg-slate-100 text-slate-600 border border-slate-200"
-                }`}
-              >
-                {milestoneDescription(milestone)}
-              </span>
-            </li>
-          );
-        })}
-
-        <li className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/50 p-2.5 transition hover:border-slate-300 border-t border-slate-200">
-          <div>
-            <span className="font-bold text-slate-900">20% decline</span>
-            <span className="ml-1 text-[11px] text-slate-500">from baseline</span>
-          </div>
-          <span
-            className={`rounded-lg px-2.5 py-1 font-mono text-[11px] font-semibold text-right ${
-              analysis.egfr.decline_20_percent?.status === "crossed"
-                ? "bg-violet-100 text-violet-800 border border-violet-200"
-                : "bg-slate-100 text-slate-600 border border-slate-200"
-            }`}
-          >
-            {milestoneDescription(analysis.egfr.decline_20_percent)}
-          </span>
-        </li>
-      </ul>
-
-      <p className="mt-3.5 text-[11px] leading-4 text-slate-500">
-        Threshold times between points are linearly interpolated; nothing is extrapolated. eGFR &lt;15 is a modeled filtration threshold, not a treatment or dialysis prediction.
-      </p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[320px] text-xs">
+          <thead><tr className="border-b border-slate-100 text-left text-[10px] uppercase tracking-wide text-slate-500"><th className="py-2 pr-2">Threshold</th><th className="px-2 py-2">No treatment</th><th className="px-2 py-2">SGLT2i-informed scenario</th></tr></thead>
+          <tbody>
+            {["60", "45", "30", "15", "decline_20_percent"].map((key) => {
+              const title = key === "decline_20_percent" ? "20% decline" : `eGFR ${key}`;
+              const noTreatmentMilestone = key === "decline_20_percent" ? scenarios[0].analysis.egfr.decline_20_percent : scenarios[0].analysis.egfr.thresholds?.[key];
+              const treatmentMilestone = key === "decline_20_percent" ? scenarios[1].analysis.egfr.decline_20_percent : scenarios[1].analysis.egfr.thresholds?.[key];
+              return <tr key={key} className="border-b border-slate-50 last:border-0">
+                <th className="py-2 pr-2 text-left font-semibold text-slate-800">{title}</th>
+                {[noTreatmentMilestone, treatmentMilestone].map((milestone, index) => <td key={index} className="px-2 py-2 font-mono text-[11px] text-slate-700">{milestoneDescription(milestone)}</td>)}
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[11px] leading-4 text-slate-500">Crossings between points use linear interpolation; none are extrapolated. eGFR below 15 is a modeled filtration threshold, not a dialysis or treatment prediction.</p>
     </section>
   );
 }
