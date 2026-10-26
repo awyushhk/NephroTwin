@@ -52,6 +52,14 @@ The function returns time points, hypothetical eGFR and UACR values, and the int
 
 The implementation initializes its state from `egfr0`, integrates it with SciPy `solve_ivp` (LSODA), maps the state to eGFR, and derives UACR. Model constants and defaults are defined in `model_core.py`. These equations and their output semantics are inherited from the attributed upstream implementation.
 
+### Internal state interpretation
+
+The internal state is `N`, initialized as `clip((eGFR / 120) ** (1 / 0.8), 1e-4, 1)` by `N_of_egfr()`. The model evolves it with `dN/dt = -N * renal_hazard_v2(...)`, then maps it back with `eGFR = 120 * N ** 0.8`. `N` is a dimensionless, normalized mathematical state used by the equations. Although the implementation refers to remaining nephron function, this application has no measurement that calibrates `N` as an individual's surviving-nephron fraction or supports converting it to an absolute nephron count. The hazard function drives its change; the modeled UACR also changes as a function of the state ratio. The UI therefore does not display `N` as a patient measurement or nephron percentage.
+
+### Application trajectory summaries
+
+The API derives summaries from the returned simulation points. Endpoint changes use the first and last valid values and their returned time coordinates; average annualized change is endpoint change divided by elapsed simulated years. eGFR categories use inclusive lower boundaries at 90 (G1), 60 (G2), 45 (G3a), 30 (G3b), and 15 (G4), with lower values in G5. UACR in mg/g is A1 below 30, A2 from 30 through 300 inclusive, and A3 above 300. Threshold times between adjacent simulation points are linearly interpolated; the application does not extrapolate beyond the simulated horizon. These labels and milestones describe model outputs and do not establish a diagnosis or individual clinical outcome.
+
 This deterministic output is a hypothetical research simulation, not a validated patient-specific forecast, diagnosis, or treatment recommendation. It does not represent continuous monitoring or establish that any intervention causes a change in outcome. The original function does not provide comprehensive input validation; malformed inputs may raise native NumPy/SciPy errors or produce non-finite values. Callers should provide finite numeric measurements, a nonnegative horizon, a positive integer `n`, and a compatible parameter mapping when overriding defaults.
 
 Bundled parameters are trial-anchored defaults; the module does not train or fit parameters and does not require calibration files or clinical datasets. Example values are illustrative and are not patient data. Runtime numerical dependencies are NumPy and SciPy.

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from math import isfinite
 
+from api.trajectory_analysis import summarize_trajectory
+
 from api.renal_twin import (
     _select_ordered_latest,
     observation_date,
@@ -278,6 +280,7 @@ def simulate_nephroq(rows, patient_id: int, years: float, baseline_observation_i
         "index_date": eligibility["index_date"],
         "baseline_inputs": inputs,
         "trajectory": trajectory,
+        "analysis": summarize_trajectory(trajectory),
         "time_to_egfr_below_15_years": threshold_years if isfinite(threshold_years) else None,
         "assumptions": {
             "u": 0.0,

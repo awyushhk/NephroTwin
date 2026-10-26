@@ -2,10 +2,22 @@ from pathlib import Path
 
 
 PAGE = Path(__file__).resolve().parents[2] / "web" / "src" / "app" / "renal-digital-twin" / "page.tsx"
+COMPONENTS_DIR = PAGE.parent / "components"
+TYPES = PAGE.parent / "types.ts"
+
+
+def _load_ui_source() -> str:
+    parts = [PAGE.read_text(encoding="utf-8")]
+    if TYPES.exists():
+        parts.append(TYPES.read_text(encoding="utf-8"))
+    if COMPONENTS_DIR.exists():
+        for comp in sorted(COMPONENTS_DIR.glob("*.tsx")):
+            parts.append(comp.read_text(encoding="utf-8"))
+    return "\n".join(parts)
 
 
 def test_timeline_renders_date_only_without_showing_a_fabricated_time():
-    source = PAGE.read_text(encoding="utf-8")
+    source = _load_ui_source()
     assert 'timestamp_precision?: "exact_time" | "date_only"' in source
     assert 'if (row.timestamp_precision === "date_only") return formatDate(row.observed_date, false)' in source
     assert 'Date only · seq {row.source_sequence_number}' in source

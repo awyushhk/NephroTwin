@@ -39,6 +39,7 @@ export default function Header({ onOpenMobile }: HeaderProps) {
     if (pathname === "/") return "Overview Dashboard";
     if (pathname.startsWith("/clinical-risk")) return "Clinical Risk Assessment (Tabular)";
     if (pathname.startsWith("/ct-analysis")) return "CT Scan Analysis (Image Deep Learning)";
+    if (pathname.startsWith("/renal-digital-twin")) return "Renal Digital Twin";
     if (pathname.startsWith("/about-models")) return "Model Specifications & Governance";
     return "KidneyCare AI";
   };

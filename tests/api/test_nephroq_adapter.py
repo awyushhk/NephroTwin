@@ -50,6 +50,10 @@ def test_nephroq_all_fresh_inputs_from_different_dates_are_eligible_and_run():
     assert result["baseline_inputs"]["systolic_bp"]["stale"] is False
     assert result["baseline_inputs"]["systolic_bp"]["source_observation_id"] == "source-5"
     assert result["baseline_inputs"]["systolic_bp"]["timestamp_precision"] == "date_only"
+    assert result["analysis"]["egfr"]["starting"] == pytest.approx(58.0)
+    assert result["analysis"]["egfr"]["final"] == pytest.approx(result["trajectory"][-1]["egfr"])
+    assert result["analysis"]["uacr"]["final"] == pytest.approx(result["trajectory"][-1]["uacr"])
+    assert result["analysis"]["categories"]["starting"] is not None
     assert result["assumptions"]["u"] == 0.0
     assert result["time_to_egfr_below_15_years"] is None
     assert any("different dates" in warning for warning in result["warnings"])
