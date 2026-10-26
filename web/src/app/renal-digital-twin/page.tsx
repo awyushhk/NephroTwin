@@ -1813,7 +1813,7 @@ export default function RenalDigitalTwinPage() {
             </div>
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-violet-800">
-                03 · Hypothetical
+                03 · What-if
               </p>
               <h2
                 id="scenario-heading"
@@ -1822,19 +1822,20 @@ export default function RenalDigitalTwinPage() {
                 What-if scenario simulator
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-600">
-                Compare user-defined eGFR assumptions from one recorded baseline. These deterministic scenarios are not predictions.
+                Explore simple eGFR assumptions from a recorded result. All results are hypothetical.
               </p>
             </div>
           </div>
         </div>
-        <div className="space-y-3 border-b border-violet-100 bg-violet-50/40 px-5 py-4 sm:px-6">
+        <div className="space-y-3 border-b border-violet-100 bg-violet-50/40 px-5 py-3 sm:px-6">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-slate-700">Simulation mode</span>
-            <button type="button" aria-pressed={simulatorMode === "linear"} onClick={() => setSimulatorMode("linear")} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${simulatorMode === "linear" ? "bg-violet-700 text-white" : "border border-slate-300 bg-white text-slate-600"}`}>Linear eGFR scenario</button>
-            <button type="button" aria-pressed={simulatorMode === "mechanistic"} disabled={!trajectoryInputsAvailable} onClick={() => setSimulatorMode("mechanistic")} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${simulatorMode === "mechanistic" ? "border-violet-700 bg-violet-700 text-white" : "border-slate-300 bg-white text-slate-600"}`}>Mechanistic trajectory simulation {trajectoryEligibilityLoading ? "· checking inputs" : trajectoryInputsAvailable ? "· eligible" : "· review required"}</button>
+            <span className="text-xs font-semibold text-slate-700">Mode</span>
+            <button type="button" aria-pressed={simulatorMode === "linear"} onClick={() => setSimulatorMode("linear")} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${simulatorMode === "linear" ? "bg-violet-700 text-white" : "border border-slate-300 bg-white text-slate-600"}`}>Linear</button>
+            <button type="button" aria-pressed={simulatorMode === "mechanistic"} onClick={() => setSimulatorMode("mechanistic")} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${simulatorMode === "mechanistic" ? "border-violet-700 bg-violet-700 text-white" : "border-slate-300 bg-white text-slate-600"}`}>Trajectory model {trajectoryEligibilityLoading ? "· checking" : trajectoryInputsAvailable ? "· ready" : "· review inputs"}</button>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {trajectoryInputRows.map(({ key, label }) => {
+          {simulatorMode === "mechanistic" && <>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {trajectoryInputRows.filter(({ key }) => key !== "egfr").map(({ key, label }) => {
               const inputStatus = trajectoryEligibility?.inputs[key];
               return <div key={label} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
                 <p className="font-semibold text-slate-700">{label}</p>
@@ -1845,8 +1846,9 @@ export default function RenalDigitalTwinPage() {
               </div>;
             })}
           </div>
-          <p className="text-xs leading-5 text-amber-900">Select an eGFR index below. Inputs after that index are excluded; ambiguous same-day date-only versus exact-time readings and stale required inputs block simulation. The freshness window is {trajectoryEligibility?.freshness_threshold_days ?? 90} days, an adjustable data-review policy rather than a clinically validated cutoff. Differently dated readings within that window are allowed but are not assumed simultaneous. This simulation is research-only, not a validated patient-specific forecast.</p>
+          <p className="text-xs leading-5 text-amber-900">Inputs must be no later than the selected eGFR date and within the {trajectoryEligibility?.freshness_threshold_days ?? 90}-day review window. Dates are not assumed simultaneous. Research use only; not a clinical forecast.</p>
           {trajectoryEligibility?.blockers.map((blocker) => <p key={blocker} className="text-xs font-medium text-rose-800">{blocker}</p>)}
+          </>}
         </div>
         {simulatorMode === "linear" ? <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
           <form
@@ -1858,7 +1860,7 @@ export default function RenalDigitalTwinPage() {
                 htmlFor="scenario-baseline"
                 className="text-xs font-semibold text-slate-700"
               >
-                1. Starting eGFR (recorded result)
+                Starting eGFR
               </label>
               <select
                 id="scenario-baseline"
@@ -1881,19 +1883,19 @@ export default function RenalDigitalTwinPage() {
               </select>
             </div>
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">2. Define at least two different yearly changes</p><button type="button" onClick={() => setScenarioDrafts((current) => current.length >= 5 ? current : [...current, { key: crypto.randomUUID(), rate: "" }])} disabled={scenarioDrafts.length >= 5} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-50 disabled:opacity-40"><Plus className="h-3.5 w-3.5" />Add scenario</button></div>
+              <div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">Annual eGFR change</p><button type="button" onClick={() => setScenarioDrafts((current) => current.length >= 5 ? current : [...current, { key: crypto.randomUUID(), rate: "" }])} disabled={scenarioDrafts.length >= 5} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-50 disabled:opacity-40"><Plus className="h-3.5 w-3.5" />Add</button></div>
               {scenarioDrafts.map((draft, index) => <div key={draft.key} className="flex items-end gap-2 rounded-xl border border-slate-200 bg-white p-3">
-                <label htmlFor={`scenario-rate-${index}`} className="min-w-0 flex-1 text-xs font-semibold text-slate-700">Scenario {String.fromCharCode(65 + index)} · eGFR change per year<input id={`scenario-rate-${index}`} className={input} type="number" min="-30" max="30" step="0.1" required value={draft.rate} onChange={(event) => setScenarioDrafts((current) => current.map((item) => item.key === draft.key ? { ...item, rate: event.target.value } : item))} placeholder="e.g. -1.0" /></label>
+                <label htmlFor={`scenario-rate-${index}`} className="min-w-0 flex-1 text-xs font-semibold text-slate-700">Scenario {String.fromCharCode(65 + index)} · mL/min/1.73m² per year<input id={`scenario-rate-${index}`} className={input} type="number" min="-30" max="30" step="0.1" required value={draft.rate} onChange={(event) => setScenarioDrafts((current) => current.map((item) => item.key === draft.key ? { ...item, rate: event.target.value } : item))} placeholder="e.g. -1.0" /></label>
                 {scenarioDrafts.length > 2 && <button type="button" aria-label={`Remove scenario ${index + 1}`} onClick={() => setScenarioDrafts((current) => current.filter((item) => item.key !== draft.key))} className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-700"><Trash2 className="h-4 w-4" /></button>}
               </div>)}
-              <p className="text-[11px] text-slate-500">Use different values between −30 and +30 mL/min/1.73m²/year. The rate is your assumption; it is not learned from the patient’s record.</p>
+              <p className="text-[11px] text-slate-500">Choose different rates (−30 to +30). These are your assumptions, not patient predictions.</p>
             </div>
             <div>
               <label
                 htmlFor="scenario-horizon"
                 className="text-xs font-semibold text-slate-700"
               >
-                3. Compare at the same time period
+                Compare after (months)
               </label>
               <input
                 id="scenario-horizon"
@@ -1906,7 +1908,7 @@ export default function RenalDigitalTwinPage() {
                 value={horizon}
                 onChange={(event) => setHorizon(event.target.value)}
               />
-              <p className="mt-1 text-[11px] text-slate-500">Enter 1 to 120 months.</p>
+              <p className="mt-1 text-[11px] text-slate-500">1–120 months</p>
             </div>
             <button
               className={`${primaryButton} w-full bg-violet-700 hover:bg-violet-800`}
@@ -1922,11 +1924,9 @@ export default function RenalDigitalTwinPage() {
               ) : (
                 <ArrowRight className="h-4 w-4" />
               )}
-              {savingScenario ? "Saving comparison…" : "Save and compare scenarios"}
+              {savingScenario ? "Saving…" : "Compare scenarios"}
             </button>
-            <p className="text-[11px] leading-5 text-slate-500">
-              Calculation: baseline + assumed annual change × months / 12. Results are hypothetical and are not a validated clinical forecast or treatment effect.
-            </p>
+            <p className="text-[11px] leading-5 text-slate-500">Hypothetical calculation: baseline + yearly change × months / 12.</p>
           </form>
           <div className="min-w-0 h-full">
             {scenarios.length ? (
@@ -2036,12 +2036,12 @@ export default function RenalDigitalTwinPage() {
                 {[1, 5, 10, 15].map((years) => <option key={years} value={years}>{years} {years === 1 ? "year" : "years"}</option>)}
               </select>
             </div>
-            <p className="text-xs leading-5 text-slate-600">The selected eGFR observation defines the index. Other required values must be valid, no later than that index, and within the configured freshness window. Exact timestamps are compared only with exact timestamps; same-day date-only versus exact-time order is treated as ambiguous.</p>
+            <p className="text-xs leading-5 text-slate-600">Uses recorded inputs at or before this eGFR date. Stale or ambiguous inputs block the run.</p>
             <button className={`${primaryButton} w-full bg-violet-700 hover:bg-violet-800`} disabled={!patientId || !scenarioBase || !trajectoryInputsAvailable || trajectoryEligibilityLoading || trajectoryLoading}>
               {trajectoryLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
               {trajectoryLoading ? "Running simulation…" : "Run trajectory simulation"}
             </button>
-            <p className="text-[11px] leading-5 text-slate-500">Uses the module’s bundled trial-anchored defaults with u=0 and 400 points. No patient-specific fitting, training, or treatment effect is applied.</p>
+            <p className="text-[11px] leading-5 text-slate-500">Research simulation using bundled defaults; no patient-specific fitting or treatment effect.</p>
           </form>
           <div className="min-h-[24rem] min-w-0 rounded-2xl border border-violet-200 bg-white p-4 sm:p-5">
             {!trajectoryResultForPatient ? <div className="flex h-full min-h-80 flex-col items-center justify-center text-center">
