@@ -30,6 +30,8 @@ export type MeasurementType =
   | "diastolic_bp"
   | "hba1c";
 
+export type MeasurementFilter = MeasurementType | "all";
+
 export type ObservationDateFields = {
   observed_at?: string | null;
   observed_date?: string | null;

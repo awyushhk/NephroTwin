@@ -13,6 +13,7 @@ import type {
   ChartObservation,
   ExamplePatient,
   Measurement,
+  MeasurementFilter,
   MeasurementType,
   Observation,
   ObservationDateFields,
@@ -153,7 +154,6 @@ const specs: Record<MeasurementType, MeasurementSpec> = {
   diastolic_bp: { label: "Diastolic blood pressure", short: "Diastolic BP", unit: "mmHg", color: "#c2410c", decimals: 0 },
   hba1c: { label: "HbA1c (%)", short: "HbA1c", unit: "%", color: "#be123c", decimals: 1 },
 };
-
 const input =
   "mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:border-teal-600 focus:ring-4 focus:ring-teal-100 disabled:bg-slate-100 disabled:text-slate-400";
 const primaryButton =
@@ -180,7 +180,7 @@ export default function RenalDigitalTwinPage() {
   const [trajectoryEligibilityState, setTrajectoryEligibilityState] = useState<TrajectoryEligibilityState | null>(null);
   const [trajectoryEligibilityLoading, setTrajectoryEligibilityLoading] = useState(false);
   const [analysisWindowDays, setAnalysisWindowDays] = useState("all");
-  const [measurementFilter, setMeasurementFilter] = useState<MeasurementType>("egfr");
+  const [measurementFilter, setMeasurementFilter] = useState<MeasurementFilter>("egfr");
   const [kind, setKind] = useState<MeasurementType>("egfr");
   const [value, setValue] = useState("");
   const [observedAt, setObservedAt] = useState("");
@@ -299,9 +299,17 @@ export default function RenalDigitalTwinPage() {
     let active = true;
     const fetchChart = async () => {
       try {
-        const data = await renalTwinRequest<Observation[]>(
-          `/patients/${patientId}/observations?measurement_type=${encodeURIComponent(measurementFilter)}&limit=500&offset=0&recent=true`,
-        );
+        const measurementQuery = measurementFilter === "all" ? "" : `measurement_type=${encodeURIComponent(measurementFilter)}&`;
+        const data: Observation[] = [];
+        let offset = 0;
+        while (true) {
+          const batch = await renalTwinRequest<Observation[]>(
+            `/patients/${patientId}/observations?${measurementQuery}limit=500&offset=${offset}&recent=true`,
+          );
+          data.push(...batch);
+          if (measurementFilter !== "all" || batch.length < 500) break;
+          offset += batch.length;
+        }
         if (active) setChartObservations(data);
       } catch (err) {
         if (active) {
@@ -325,8 +333,9 @@ export default function RenalDigitalTwinPage() {
     setTimelineLoading(true);
     const fetchTimeline = async () => {
       try {
+        const measurementQuery = measurementFilter === "all" ? "" : `measurement_type=${encodeURIComponent(measurementFilter)}&`;
         const data = await renalTwinRequest<Observation[]>(
-          `/patients/${patientId}/observations?measurement_type=${encodeURIComponent(measurementFilter)}&limit=${TIMELINE_PAGE_SIZE}&offset=${timelinePage * TIMELINE_PAGE_SIZE}&recent=true`,
+          `/patients/${patientId}/observations?${measurementQuery}limit=${TIMELINE_PAGE_SIZE}&offset=${timelinePage * TIMELINE_PAGE_SIZE}&recent=true`,
         );
         if (active) setTimelineRows(data);
       } catch (err) {
@@ -669,7 +678,7 @@ export default function RenalDigitalTwinPage() {
   }
 
   const analysisBounds = useMemo(() => {
-    const selectedRows = chartObservations.filter((row) => row.measurement_type === measurementFilter);
+    const selectedRows = chartObservations.filter((row) => measurementFilter === "all" || row.measurement_type === measurementFilter);
     if (!selectedRows.length) return undefined;
     const calendarDateAxis = selectedRows.some((row) => row.timestamp_precision === "date_only");
     const times = selectedRows.map((row) => observationCoordinate(row, calendarDateAxis));
@@ -685,7 +694,7 @@ export default function RenalDigitalTwinPage() {
 
   const timelineChartObservations = useMemo(() => {
     if (!analysisBounds) return [];
-    const selectedRows = chartObservations.filter((row) => row.measurement_type === measurementFilter);
+    const selectedRows = chartObservations.filter((row) => measurementFilter === "all" || row.measurement_type === measurementFilter);
     const calendarDateAxis = selectedRows.some((row) => row.timestamp_precision === "date_only");
     return selectedRows.filter((row) => {
       const time = observationCoordinate(row, calendarDateAxis);
@@ -857,12 +866,12 @@ export default function RenalDigitalTwinPage() {
         setAnalysisWindowDays={setAnalysisWindowDays}
         analysisBounds={analysisBounds}
         specs={specs}
-        selectedMeasurement={specs[measurementFilter]}
         timelineLoading={timelineLoading}
         timelineRows={timelineRows}
         timelinePage={timelinePage}
         setTimelinePage={setTimelinePage}
         twin={twin}
+        totalObservationCount={selectedPatient?.observation_count ?? 0}
         formatObservationDate={formatObservationDate}
         observationCoordinate={observationCoordinate}
         observationSortValue={observationSortValue}

@@ -226,7 +226,7 @@ export function CurrentRenalState({
             <Clock3 className="h-4 w-4 text-slate-500" />
           </div>
           <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{selectedPatient?.observation_count.toLocaleString() ?? "\u2014"}</p>
-          <p className="mt-1 text-xs text-slate-500">source observations \u00b7 irregular timestamps</p>
+          <p className="mt-1 text-xs text-slate-500">source observations · irregular timestamps</p>
         </div>
       </div>
 
