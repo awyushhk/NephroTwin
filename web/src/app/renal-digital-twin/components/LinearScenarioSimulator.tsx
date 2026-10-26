@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -9,6 +9,7 @@ import {
   Minus,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import type {
   MeasurementType,
@@ -45,6 +46,7 @@ export function LinearScenarioSimulator({
   scenarios,
   observations,
   deleteScenario,
+  deleteScenarioGroup,
   deletingScenarioId,
   inputClassName,
   primaryButtonClassName,
@@ -69,6 +71,7 @@ export function LinearScenarioSimulator({
   scenarios: Scenario[];
   observations: Observation[];
   deleteScenario: (id: number) => Promise<void>;
+  deleteScenarioGroup: (ids: number[]) => Promise<void>;
   deletingScenarioId: number | null;
   inputClassName: string;
   primaryButtonClassName: string;
@@ -79,6 +82,7 @@ export function LinearScenarioSimulator({
   observationX: (value: string, start: number, span: number) => number;
   valueY: (value: number, low: number, high: number) => number;
 }) {
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
   const horizonNum = Number(horizon) || 12;
   const horizonYears = (horizonNum / 12).toFixed(horizonNum % 12 === 0 ? 0 : 1);
 
@@ -370,7 +374,7 @@ export function LinearScenarioSimulator({
           </div>
         </div>
       ) : (
-        <div className="space-y-8 p-5 sm:p-6">
+        <div className="space-y-5 p-5 sm:p-6">
           {scenarioGroups.map((group, groupIdx) => {
             const refScenario = group[0];
             if (!refScenario) return null;
@@ -379,167 +383,194 @@ export function LinearScenarioSimulator({
             const baselineLabel = baseline ? formatObservationDate(baseline) : "—";
             const horizonMo = refScenario.horizon_months;
             const isNewGroup = groupIdx === 0;
+            const groupId = refScenario.assumptions.comparison_group_id ?? String(refScenario.id);
+            const groupIds = group.map((s) => s.id);
+            const isDeletingGroup = deletingGroupId === groupId;
 
             return (
-              <section key={refScenario.assumptions.comparison_group_id ?? refScenario.id} aria-label={`Comparison group ${groupIdx + 1}`}>
+              <section
+                key={groupId}
+                aria-label={`Comparison group ${groupIdx + 1}`}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+              >
                 {/* Group header */}
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-3">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                        Comparison {scenarioGroups.length - groupIdx}
+                      </span>
                       {isNewGroup && (
-                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                        <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                           Latest
                         </span>
                       )}
-                      <p className="text-xs font-semibold text-slate-800">
-                        {group.length} hypothetical path{group.length !== 1 ? "s" : ""} · {horizonMo}-month horizon
-                      </p>
+                      <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                        Linear model
+                      </span>
                     </div>
+                    <p className="mt-1.5 text-xs font-semibold text-slate-800">
+                      {group.length} hypothetical path{group.length !== 1 ? "s" : ""} · {horizonMo}-month horizon
+                    </p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
                       Baseline: {baselineValue ?? "—"} mL/min/1.73m² · {baselineLabel}
                     </p>
                   </div>
-                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 uppercase tracking-wide">
-                    Linear model
-                  </span>
+                  {/* Delete entire group button */}
+                  <button
+                    type="button"
+                    aria-label={`Delete comparison group ${scenarioGroups.length - groupIdx}`}
+                    disabled={isDeletingGroup || deletingScenarioId !== null}
+                    onClick={() => {
+                      setDeletingGroupId(groupId);
+                      void deleteScenarioGroup(groupIds).finally(() => setDeletingGroupId(null));
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 hover:border-rose-300 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {isDeletingGroup ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <X className="h-3.5 w-3.5" />
+                    )}
+                    {isDeletingGroup ? "Deleting…" : "Delete group"}
+                  </button>
                 </div>
 
-                {/* Recorded eGFR and linear scenario paths chart */}
-                {baselineValue != null && group.length > 0 && (
-                  <div className="mb-4">
-                    <TrendChart
-                      observations={observations}
-                      scenarios={group}
-                      measure="egfr"
-                      specs={specs}
-                      formatObservationDate={formatObservationDate}
-                      observationCoordinate={observationCoordinate}
-                      observationSortValue={observationSortValue}
-                      formatUtcMonth={formatUtcMonth}
-                      observationX={observationX}
-                      valueY={valueY}
-                    />
-                  </div>
-                )}
+                <div className="p-4">
+                  {/* Recorded eGFR and linear scenario paths chart */}
+                  {baselineValue != null && group.length > 0 && (
+                    <div className="mb-4">
+                      <TrendChart
+                        observations={observations}
+                        scenarios={group}
+                        measure="egfr"
+                        specs={specs}
+                        formatObservationDate={formatObservationDate}
+                        observationCoordinate={observationCoordinate}
+                        observationSortValue={observationSortValue}
+                        formatUtcMonth={formatUtcMonth}
+                        observationX={observationX}
+                        valueY={valueY}
+                      />
+                    </div>
+                  )}
 
-                {/* Scenario cards — compact table-like rows */}
-                <div className="overflow-hidden rounded-xl border border-slate-200">
-                  {/* Header row */}
-                  <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center gap-px bg-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:gap-0">
-                    <div className="bg-slate-50 px-3 py-2">Path</div>
-                    <div className="bg-slate-50 px-3 py-2">Assumed rate</div>
-                    <div className="bg-slate-50 px-3 py-2">eGFR at month {horizonMo}</div>
-                    <div className="bg-slate-50 px-3 py-2">vs Scenario A</div>
-                    <div className="bg-slate-50 px-3 py-2" />
-                  </div>
+                  {/* Scenario cards — compact table-like rows */}
+                  <div className="overflow-hidden rounded-xl border border-slate-200">
+                    {/* Header row */}
+                    <div className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center gap-px bg-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500 sm:gap-0">
+                      <div className="bg-slate-50 px-3 py-2">Path</div>
+                      <div className="bg-slate-50 px-3 py-2">Assumed rate</div>
+                      <div className="bg-slate-50 px-3 py-2">eGFR at month {horizonMo}</div>
+                      <div className="bg-slate-50 px-3 py-2">vs Scenario A</div>
+                      <div className="bg-slate-50 px-3 py-2" />
+                    </div>
 
-                  {group.map((scenario, i) => {
-                    const col = SCENARIO_COLORS[i % SCENARIO_COLORS.length];
-                    const endPt = scenario.output.points.at(-1);
-                    const refEnd = group[0]?.output.points.at(-1)?.value;
-                    const diff =
-                      i > 0 && endPt?.value != null && refEnd != null
-                        ? endPt.value - refEnd
-                        : null;
-                    const isRef = i === 0;
+                    {group.map((scenario, i) => {
+                      const col = SCENARIO_COLORS[i % SCENARIO_COLORS.length];
+                      const endPt = scenario.output.points.at(-1);
+                      const refEnd = group[0]?.output.points.at(-1)?.value;
+                      const diff =
+                        i > 0 && endPt?.value != null && refEnd != null
+                          ? endPt.value - refEnd
+                          : null;
+                      const isRef = i === 0;
 
-                    return (
-                      <div
-                        key={scenario.id}
-                        className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center border-t border-slate-100 bg-white text-xs transition hover:bg-slate-50"
-                      >
-                        {/* Label swatch */}
-                        <div className="px-3 py-3">
-                          <span className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${col.bg} ${col.text}`}>
-                            {String.fromCharCode(65 + i)}
-                          </span>
-                        </div>
-
-                        {/* Rate */}
-                        <div className="px-3 py-3">
-                          <span className="font-mono font-semibold text-slate-900">
-                            {scenario.assumptions.rate_per_year >= 0 ? "+" : ""}
-                            {scenario.assumptions.rate_per_year}
-                          </span>
-                          <span className="ml-1 text-[10px] text-slate-500">mL/min/yr</span>
-                          {isRef && (
-                            <span className="ml-2 text-[10px] text-slate-400">(reference)</span>
-                          )}
-                        </div>
-
-                        {/* Endpoint */}
-                        <div className="px-3 py-3">
-                          <span className="font-mono font-semibold text-slate-900">
-                            {endPt?.value?.toFixed(1) ?? "—"}
-                          </span>
-                          <span className="ml-1 text-[10px] text-slate-500">mL/min/1.73m²</span>
-                        </div>
-
-                        {/* Difference from A */}
-                        <div className="px-3 py-3">
-                          {diff != null ? (
-                            <span
-                              className={`font-mono font-semibold ${
-                                diff < 0 ? "text-rose-700" : diff > 0 ? "text-emerald-700" : "text-slate-500"
-                              }`}
-                            >
-                              {diff >= 0 ? "+" : ""}
-                              {diff.toFixed(1)}
+                      return (
+                        <div
+                          key={scenario.id}
+                          className="grid grid-cols-[auto_1fr_1fr_1fr_auto] items-center border-t border-slate-100 bg-white text-xs transition hover:bg-slate-50"
+                        >
+                          {/* Label swatch */}
+                          <div className="px-3 py-3">
+                            <span className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${col.bg} ${col.text}`}>
+                              {String.fromCharCode(65 + i)}
                             </span>
-                          ) : isRef ? (
-                            <span className="text-[10px] text-slate-400">—</span>
-                          ) : (
-                            <span className="text-[10px] text-slate-400">—</span>
-                          )}
-                        </div>
+                          </div>
 
-                        {/* Remove */}
-                        <div className="px-2 py-3">
-                          <button
-                            type="button"
-                            onClick={() => void deleteScenario(scenario.id)}
-                            disabled={deletingScenarioId !== null}
-                            aria-label={`Remove scenario ${String.fromCharCode(65 + i)}`}
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:opacity-50 transition"
-                          >
-                            {deletingScenarioId === scenario.id ? (
-                              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3.5 w-3.5" />
+                          {/* Rate */}
+                          <div className="px-3 py-3">
+                            <span className="font-mono font-semibold text-slate-900">
+                              {scenario.assumptions.rate_per_year >= 0 ? "+" : ""}
+                              {scenario.assumptions.rate_per_year}
+                            </span>
+                            <span className="ml-1 text-[10px] text-slate-500">mL/min/yr</span>
+                            {isRef && (
+                              <span className="ml-2 text-[10px] text-slate-400">(reference)</span>
                             )}
-                          </button>
+                          </div>
+
+                          {/* Endpoint */}
+                          <div className="px-3 py-3">
+                            <span className="font-mono font-semibold text-slate-900">
+                              {endPt?.value?.toFixed(1) ?? "—"}
+                            </span>
+                            <span className="ml-1 text-[10px] text-slate-500">mL/min/1.73m²</span>
+                          </div>
+
+                          {/* Difference from A */}
+                          <div className="px-3 py-3">
+                            {diff != null ? (
+                              <span
+                                className={`font-mono font-semibold ${
+                                  diff < 0 ? "text-rose-700" : diff > 0 ? "text-emerald-700" : "text-slate-500"
+                                }`}
+                              >
+                                {diff >= 0 ? "+" : ""}
+                                {diff.toFixed(1)}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">—</span>
+                            )}
+                          </div>
+
+                          {/* Remove */}
+                          <div className="px-2 py-3">
+                            <button
+                              type="button"
+                              onClick={() => void deleteScenario(scenario.id)}
+                              disabled={deletingScenarioId !== null}
+                              aria-label={`Remove scenario ${String.fromCharCode(65 + i)}`}
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:opacity-50 transition"
+                            >
+                              {deletingScenarioId === scenario.id ? (
+                                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Warnings — exclude the generic "not a clinical forecast" notice */}
+                  {(() => {
+                    const uniqueWarnings = Array.from(
+                      new Set(group.flatMap((s) => s.output.warnings))
+                    ).filter(
+                      (w) =>
+                        !w.toLowerCase().includes("deterministic") &&
+                        !w.toLowerCase().includes("not a validated clinical") &&
+                        !w.toLowerCase().includes("mathematical illustration")
+                    );
+                    if (uniqueWarnings.length === 0) return null;
+                    return (
+                      <div className="mt-3 space-y-1">
+                        {uniqueWarnings.map((w, idx) => (
+                          <p
+                            key={`warning-${refScenario.id}-${idx}`}
+                            className="flex items-start gap-1.5 text-[11px] text-amber-800"
+                          >
+                            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                            {w}
+                          </p>
+                        ))}
                       </div>
                     );
-                  })}
+                  })()}
                 </div>
-
-                {/* Warnings */}
-                {(() => {
-                  const uniqueWarnings = Array.from(
-                    new Set(group.flatMap((s) => s.output.warnings))
-                  );
-                  if (uniqueWarnings.length === 0) return null;
-                  return (
-                    <div className="mt-2 space-y-1">
-                      {uniqueWarnings.map((w, idx) => (
-                        <p
-                          key={`warning-${refScenario.id}-${idx}`}
-                          className="flex items-start gap-1.5 text-[11px] text-amber-800"
-                        >
-                          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                          {w}
-                        </p>
-                      ))}
-                    </div>
-                  );
-                })()}
-
-                {/* Disclaimer */}
-                <p className="mt-2.5 text-[11px] leading-4 text-slate-500">
-                  Mathematical illustration only. Not a validated clinical forecast, diagnosis, or treatment recommendation.
-                  Rates are user-supplied assumptions, not inferred from the patient's observed progression.
-                </p>
               </section>
             );
           })}
@@ -547,4 +578,5 @@ export function LinearScenarioSimulator({
       )}
     </div>
   );
+
 }

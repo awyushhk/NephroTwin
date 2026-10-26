@@ -638,6 +638,28 @@ export default function RenalDigitalTwinPage() {
     }
   }
 
+  async function deleteScenarioGroup(ids: number[]) {
+    if (!patientId) return;
+    setError("");
+    // Delete all scenarios in the group sequentially; ignore 404s (already deleted)
+    for (const id of ids) {
+      try {
+        await renalTwinRequest(`/patients/${patientId}/scenarios/${id}`, { method: "DELETE" });
+        deleteScenarioComparisonMetadata(patientId, id);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          deleteScenarioComparisonMetadata(patientId, id);
+        } else {
+          setError(err instanceof ApiError ? err.message : "Failed to delete scenario group.");
+          // Remove whatever was successfully deleted so far from state
+          setScenarios((current) => current.filter((item) => !ids.includes(item.id)));
+          return;
+        }
+      }
+    }
+    setScenarios((current) => current.filter((item) => !ids.includes(item.id)));
+  }
+
   function loadExamplePatient(example: ExamplePatient) {
     setPatientId(example.id);
     setTimelinePage(0);
@@ -938,6 +960,7 @@ export default function RenalDigitalTwinPage() {
             scenarios={scenarios}
             observations={observations}
             deleteScenario={deleteScenario}
+            deleteScenarioGroup={deleteScenarioGroup}
             deletingScenarioId={deletingScenarioId}
             inputClassName={input}
             primaryButtonClassName={primaryButton}
